@@ -668,7 +668,7 @@ $$
 
 * computation intensity on 1 level cache
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.37.43 PM.png" alt="Screen Shot 2022-01-26 at 8.37.43 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.37.43 PM.png" alt="Screen Shot 2022-01-26 at 8.37.43 PM" style="zoom:50%;" />
 
 
 
@@ -751,7 +751,7 @@ $$
 
 * data move analysis
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.29.58 PM.png" alt="Screen Shot 2022-01-26 at 8.29.58 PM" style="zoom:30%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.29.58 PM.png" alt="Screen Shot 2022-01-26 at 8.29.58 PM" style="zoom:30%;" />
 $$
 W(n) = 8 * W(n/2) + 4 * 3(n/2)^2 ~~ \text{if} ~~ 3n^2 > M_{fast} \\ 
 = 3n^2 ~~ \text{if fit into cache}\\
@@ -834,7 +834,7 @@ clang -O3 -std=c++11 test.cpp -o test.out -Rpass=vector
 
 改变data layout，使得读取block的时候是连续的
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.34.54 PM.png" alt="Screen Shot 2022-01-26 at 8.34.54 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.34.54 PM.png" alt="Screen Shot 2022-01-26 at 8.34.54 PM" style="zoom:50%;" />
 
 
 
@@ -845,7 +845,7 @@ clang -O3 -std=c++11 test.cpp -o test.out -Rpass=vector
 
 work $O(n^{log_2(7)})$ Where 7 来自于只有7个recursion call
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.41.30 PM.png" alt="Screen Shot 2022-01-26 at 8.41.30 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.41.30 PM.png" alt="Screen Shot 2022-01-26 at 8.41.30 PM" style="zoom:50%;" />
 
 
 
@@ -856,6 +856,5 @@ work $O(n^{log_2(7)})$ Where 7 来自于只有7个recursion call
 
 然而很多fast method并不实际，因为需要非常大的n
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.43.28 PM.png" alt="Screen Shot 2022-01-26 at 8.43.28 PM" style="zoom:50%;" />
-
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.43.28 PM.png" alt="Screen Shot 2022-01-26 at 8.43.28 PM" style="zoom:50%;" />
 

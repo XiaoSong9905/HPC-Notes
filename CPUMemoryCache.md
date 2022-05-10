@@ -104,7 +104,7 @@ each clock, core choose instructions from multiple threads to run on ALUs.
 
 speed up < number of pipeline stage (pipeline带来的速度提升upper bound by number of stage)
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 7.47.49 PM.png" alt="Screen Shot 2022-01-26 at 7.47.49 PM" style="zoom:33%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 7.47.49 PM.png" alt="Screen Shot 2022-01-26 at 7.47.49 PM" style="zoom:33%;" />
 
 硬件中多个部分都有pipeline
 
@@ -349,9 +349,9 @@ Concurrency = latency * bandwidth
 
 latency = 10 sec, bandwidth = 2 bytes/sec, concurrency = 20 bytes in flight to hit bandwidth speeds
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 7.37.41 PM.png" alt="Screen Shot 2022-01-26 at 7.37.41 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 7.37.41 PM.png" alt="Screen Shot 2022-01-26 at 7.37.41 PM" style="zoom:50%;" />
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 7.38.37 PM.png" alt="Screen Shot 2022-01-26 at 7.38.37 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 7.38.37 PM.png" alt="Screen Shot 2022-01-26 at 7.38.37 PM" style="zoom:50%;" />
 
 
 

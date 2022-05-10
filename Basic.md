@@ -28,7 +28,7 @@ ratio of math operations to data access operations in a instruction stream.
 
 因为parallel program的时候，bandwidth是critical resource。大部分cpu op都是bandwidth bound application。
 
-![Screen Shot 2022-01-26 at 8.04.09 PM](/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.04.09 PM.png)
+![Screen Shot 2022-01-26 at 8.04.09 PM](./Note.assets/Screen Shot 2022-01-26 at 8.04.09 PM.png)
 
 actual time to run program
 $$
@@ -38,42 +38,42 @@ larger CI意味着time closer to $f * t_f$
 
 machine balance $t_m/t_f$ 定义了machine的boundary
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.55.45 PM.png" alt="Screen Shot 2022-01-26 at 8.55.45 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.55.45 PM.png" alt="Screen Shot 2022-01-26 at 8.55.45 PM" style="zoom:50%;" />
 
 * potential CI for vector matrix
 
 matrix vector计算的效率很低，因为CI的理论上线只有2
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.08.00 PM.png" alt="Screen Shot 2022-01-26 at 8.08.00 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.08.00 PM.png" alt="Screen Shot 2022-01-26 at 8.08.00 PM" style="zoom:50%;" />
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.07.52 PM.png" alt="Screen Shot 2022-01-26 at 8.07.52 PM" style="zoom:30%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.07.52 PM.png" alt="Screen Shot 2022-01-26 at 8.07.52 PM" style="zoom:30%;" />
 
 * potential CI for matrix matrix
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.09.07 PM.png" alt="Screen Shot 2022-01-26 at 8.09.07 PM" style="zoom: 33%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.09.07 PM.png" alt="Screen Shot 2022-01-26 at 8.09.07 PM" style="zoom: 33%;" />
 
 naive的方法CI=2
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.09.46 PM.png" alt="Screen Shot 2022-01-26 at 8.09.46 PM" style="zoom:33%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.09.46 PM.png" alt="Screen Shot 2022-01-26 at 8.09.46 PM" style="zoom:33%;" />
 
 blocked的方法CI=n/N
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.14.23 PM.png" alt="Screen Shot 2022-01-26 at 8.14.23 PM" style="zoom:33%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.14.23 PM.png" alt="Screen Shot 2022-01-26 at 8.14.23 PM" style="zoom:33%;" />
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.15.44 PM.png" alt="Screen Shot 2022-01-26 at 8.15.44 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.15.44 PM.png" alt="Screen Shot 2022-01-26 at 8.15.44 PM" style="zoom:50%;" />
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.21.47 PM.png" alt="Screen Shot 2022-01-26 at 8.21.47 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.21.47 PM.png" alt="Screen Shot 2022-01-26 at 8.21.47 PM" style="zoom:50%;" />
 
 
 
 
 #### Communication Lower Bound
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.38.25 PM.png" alt="Screen Shot 2022-01-26 at 8.38.25 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.38.25 PM.png" alt="Screen Shot 2022-01-26 at 8.38.25 PM" style="zoom:50%;" />
 
 当使用straness的时候，减少了总的数据移动量
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.42.45 PM.png" alt="Screen Shot 2022-01-26 at 8.42.45 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.42.45 PM.png" alt="Screen Shot 2022-01-26 at 8.42.45 PM" style="zoom:50%;" />
 
 
 
@@ -160,7 +160,7 @@ parallel : 多个任务在物理硬件上同时active
 
 distributed : 一个master，多个client，一起工作。但是client并不一定一起计算
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 7.06.49 PM.png" alt="Screen Shot 2022-01-26 at 7.06.49 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 7.06.49 PM.png" alt="Screen Shot 2022-01-26 at 7.06.49 PM" style="zoom:50%;" />
 
 
 
@@ -169,7 +169,7 @@ distributed : 一个master，多个client，一起工作。但是client并不一
 
 现在的大多是petaflop，正在努力搭建exaflop
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 7.07.01 PM.png" alt="Screen Shot 2022-01-26 at 7.07.01 PM" style="zoom:50%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 7.07.01 PM.png" alt="Screen Shot 2022-01-26 at 7.07.01 PM" style="zoom:50%;" />
 
 
 
@@ -195,17 +195,17 @@ Developed by Sam Williams @ Berkeley, lots of citations, become a verb `rooflien
 
 Idea: application is limited by (1) computation (2) memory bandwidth
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.50.47 PM.png" alt="Screen Shot 2022-01-26 at 8.50.47 PM" style="zoom:30%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.50.47 PM.png" alt="Screen Shot 2022-01-26 at 8.50.47 PM" style="zoom:30%;" />
 
 * arith perf
 
 横向的是计算intensity，使用SIMD，更好的ILP，balance mul add的目的是为了提升横向线的高度
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.51.27 PM.png" alt="Screen Shot 2022-01-26 at 8.51.27 PM" style="zoom:30%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.51.27 PM.png" alt="Screen Shot 2022-01-26 at 8.51.27 PM" style="zoom:30%;" />
 
 * machine balance
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.53.11 PM.png" alt="Screen Shot 2022-01-26 at 8.53.11 PM" style="zoom:30%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.53.11 PM.png" alt="Screen Shot 2022-01-26 at 8.53.11 PM" style="zoom:30%;" />
 
 machine balance的数值越低，同样的算法适配到硬件上就更容易memory bound
 
@@ -217,7 +217,7 @@ Haswell : 10 Flops/Byte
 
 KNL : 7 Flops/Bytes
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.57.15 PM.png" alt="Screen Shot 2022-01-26 at 8.57.15 PM" style="zoom:30%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.57.15 PM.png" alt="Screen Shot 2022-01-26 at 8.57.15 PM" style="zoom:30%;" />
 
 * data movement
 
@@ -227,7 +227,7 @@ KNL : 7 Flops/Bytes
 
 * CI
 
-<img src="/Users/xiaosx/Library/Mobile Documents/com~apple~CloudDocs/HPC/Note.assets/Screen Shot 2022-01-26 at 8.55.23 PM.png" alt="Screen Shot 2022-01-26 at 8.55.23 PM" style="zoom:30%;" />
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.55.23 PM.png" alt="Screen Shot 2022-01-26 at 8.55.23 PM" style="zoom:30%;" />
 
 * memory bandwidth
 
