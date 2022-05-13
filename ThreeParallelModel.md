@@ -61,6 +61,8 @@ return all calls spawned by current function
 
 ![Screen Shot 2022-01-29 at 12.19.20 PM](Note.assets/Screen Shot 2022-01-29 at 12.19.20 PM.png)
 
+
+
 * compile
 
 ```shell
@@ -76,6 +78,10 @@ icc -fopenmp // Intel
 1. 使用fork join parallelsim
 2. 使用thread pool避免thread多次create，delete的overhead
 3. 底层调用什么thread由compiler决定，openmp定义的只是API，底层的实现可能是不一样的
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 11.31.19 PM.png" alt="Screen Shot 2022-05-12 at 11.31.19 PM" style="zoom:30%;" />
+
+
 
 
 
@@ -106,6 +112,10 @@ omp_set_num_threads(4); // suggest to create 4 threads
 
 for 带有implicit barrier在后面
 
+for loop内部需要尽量independent，这样才好parallel
+
+把loop independent variable放到loop外面
+
 ```cpp
 // 第一种方法
 #pragma omp parallel
@@ -117,9 +127,13 @@ for (int i ... )
 for ( int i ... )
 ```
 
+
+
 ##### for collapse(k)
 
 同时parallel多个for loop
+
+原因是一个for loop parallel存在not enough parallelsim的情况(e.g. thread 4个，第一个for loop有6个大块，第二个for loop有10个快，这样的情况需要collapse否则会imbalance)
 
 ```cpp
 #pragma omp parallel for collapse(2)
@@ -127,11 +141,15 @@ for( )
   for( )
 ```
 
+
+
 ##### for nowait
 
 for loop后面自带implicit barrier，为了避免implicit barrier，可以使用nowait。
 
 一般在后面不依赖for loop的结果使用nowait
+
+
 
 ##### schedule
 
@@ -151,6 +169,24 @@ for( )
 
 
 
+#### Memory Consistency
+
+shared memory模型都有cache coherence问题
+
+详细参考cache部分
+
+
+
+##### False Sharing
+
+是什么：两个thread访问不同的数据，但是不同的数据碰巧在一个cache line上面
+
+pad array to avoid false sharing
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 11.34.14 PM.png" alt="Screen Shot 2022-05-12 at 11.34.14 PM" style="zoom:30%;" />
+
+
+
 
 #### Synchronization
 
@@ -165,6 +201,8 @@ only 1 thread at a time can enter a critical region
 // some line of code
 ```
 
+
+
 ##### barrier
 
 all threads much reach barrier before any threads are allowed to processed
@@ -173,6 +211,8 @@ all threads much reach barrier before any threads are allowed to processed
 #pragma omp barrier
 // some line here
 ```
+
+
 
 ##### reduction
 
@@ -194,6 +234,8 @@ for( )
 print(ave) // ave after reduction
 ```
 
+
+
 ##### share/private/firstprivate/default(none)
 
 * default(none)
@@ -202,11 +244,19 @@ print(ave) // ave after reduction
 
 default(none)是一种好的coding habbit。
 
+
+
 * private(list)
 
 create new local copy of var for each thread
 
 private copy是uninitialized的！！！
+
+
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 11.39.02 PM.png" alt="Screen Shot 2022-05-12 at 11.39.02 PM" style="zoom:30%;" />
+
+
 
 * firstprivate(list)
 
@@ -214,12 +264,44 @@ create new local copy of var for each thread, based on the old value
 
 initialize local copy with old value。 是存在initialize的
 
+<img src="Note.assets/Screen Shot 2022-05-12 at 11.39.26 PM.png" alt="Screen Shot 2022-05-12 at 11.39.26 PM" style="zoom:33%;" />
+
+
+
+##### single
+
+block of code that is executed by only one thread
+
+implicit barrier at the end
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 11.41.59 PM.png" alt="Screen Shot 2022-05-12 at 11.41.59 PM" style="zoom:50%;" />
+
+
+
+##### Flush
+
+Flush forces data to be updated in memory so other threads see the most recent value
+
+目的是保证内存的view是一致的
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 11.46.26 PM.png" alt="Screen Shot 2022-05-12 at 11.46.26 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 11.46.50 PM.png" alt="Screen Shot 2022-05-12 at 11.46.50 PM" style="zoom:50%;" />
+
+
+
 
 
 
 #### Task
 
-TODO 还需要补充slides的内容+自学一下，这个部分没太听懂
+thread are assigned to perform work of each task
+
+Task: independent set of work that contain (1) code to execute (2) data to compute with
+
+ 
+
+TODO: 不太常用，用到的时候再看
 
 
 
@@ -1853,4 +1935,37 @@ MPI_PUT将本进程中从地址origin_addr开始数据类型为origin_datatype �
 
 <img src="Note.assets/Screen Shot 2022-02-17 at 10.12.04 PM.png" alt="Screen Shot 2022-02-17 at 10.12.04 PM" style="zoom:50%;" />
 
+
+
+### SIMD
+
+> Berkeley CS267 L2
+
+
+
+#### x86
+
+avx2 : 256 bits register, 16 register 
+
+avx512 : 512 btis register, 32 register
+
+AVX2 与 AVX512 register底层是同一个物理寄存器。之所以AVX2只有16个是因为出AVX2指令集的时候只出了这么多（当时没有512的硬件支持）
+
+AVX2 AVX512 SSE的向量化操作有些需要内存对齐(e.g. load store有对其版本和不对齐版本，速度差异会很大)
+
+x86里向量化操作的clock cycle是与scalar一致的
+
+
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 2.37.59 PM.png" alt="Screen Shot 2022-05-12 at 2.37.59 PM" style="zoom:50%;" />
+
+
+
+
+
+#### arm
+
+TODO 有空补充
+
+arm里向量化操作的clock cycle不一定与scalar一致，经常比scalar要大一点
 

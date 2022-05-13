@@ -14,6 +14,9 @@
 2. decode instruction
 3. execute
 4. memory write back result
+
+
+
 * instruction 类型
 1. operate 计算
    1. ADD R1 R2 R3
@@ -27,6 +30,8 @@
       3. load memory at address = r6
       4. store that memory in r4
 3. control flow / branching
+
+
 
 
 
@@ -90,9 +95,14 @@ pthread是用户级线程，但是linux使用了一对一的内核级线程实�
 1. 线程过多
 2. 数据竞争
 3. 死锁
+
+
+
 * hyper-threading
 
 each clock, core choose instructions from multiple threads to run on ALUs.
+
+
 
 * pipeline
 
@@ -102,7 +112,9 @@ each clock, core choose instructions from multiple threads to run on ALUs.
 
 <img src="Note.assets/Screen Shot 2021-10-22 at 6.56.24 PM.png" alt="Screen Shot 2021-10-22 at 6.56.24 PM" style="zoom:30%;" />
 
-speed up < number of pipeline stage (pipeline带来的速度提升upper bound by number of stage)
+
+
+**speed up of pipeline < number of pipeline stage** (pipeline带来的速度提升upper bound by number of stage)
 
 <img src="./Note.assets/Screen Shot 2022-01-26 at 7.47.49 PM.png" alt="Screen Shot 2022-01-26 at 7.47.49 PM" style="zoom:33%;" />
 
@@ -111,6 +123,9 @@ speed up < number of pipeline stage (pipeline带来的速度提升upper bound by
 1. 整体cpu运行是pipeline
 2. ALU内部也有pipeline
 3. memory访问也有pipeline
+
+
+
 * 分支预测
 
 x86
@@ -121,29 +136,6 @@ x86
 2. 经常使用虚函数
 
 
-
-
-### SIMD
-
-> Berkeley CS267 L2
-
-* x86
-
-avx2 : 256 bits register, 16 register 
-
-avx512 : 512 btis register, 32 register
-
-AVX2 与 AVX512 register底层是同一个物理寄存器。之所以AVX2只有16个是因为出AVX2指令集的时候只出了这么多（当时没有512的硬件支持）
-
-AVX2 AVX512 SSE的向量化操作有些需要内存对齐(e.g. load store有对其版本和不对齐版本，速度差异会很大)
-
-x86里向量化操作的clock cycle是与scalar一致的
-
-* arm
-
-TODO 有空补充
-
-arm里向量化操作的clock cycle不一定与scalar一致，经常比scalar要大一点
 
 
 
@@ -163,7 +155,7 @@ arm里向量化操作的clock cycle不一定与scalar一致，经常比scalar要
 
 
 
-#### Two Cost
+### Uniprocessor Model
 
 > Berkeley CS 267 L2
 
@@ -176,16 +168,36 @@ time to load n words = $\alpha + \beta * n$
 
 
 
+特点：
+
+1. long message cheaper than many shorter one
+2. one msg time cost = thousands of flops
+3. 上面的模型对于single processor是有用的。但是对于multi-processor是不准确的，因为NIC会是bottleneck，但是这个模型没有考虑到NIC Bottleneck
+4. memory latency 与 memory bandwidth 之间的gap越来越大。latency fall behind更多
+
+ 
 
 #### Handling Memory Latency
 
-> Berkeley CS 267 L2
-
-1. reuse value in fast memory : 增加CompInten, 减少bandwidth负担
+1. reuse value in fast memory : 增加computation, 减少bandwidth负担
 2. move larger chunks 一次性取很多数据，而不是一个数据，充分利用bandwidth
    1. 例子是多个线程取数据
-3. 使用SIMD issue multiple read & write in single instruction. 来重温利用bandwidth
-4. 使用多线程 issue multiple read & write in parallel. 来hide latency
+3. Concurrency: 使用SIMD issue multiple read & write in single instruction. 来充分利用bandwidth
+4. concurrency: 使用多线程 issue multiple read & write in parallel. 来hide latency
+
+
+
+#### Little's law for bandwidth concurrency
+
+Concurrency (num bytes in flight) = latency (sec) * bandwidth (bytes/sec)
+
+latency = 10 sec, bandwidth = 2 bytes/sec, concurrency = 20 bytes in flight to hit bandwidth speeds
+
+目的是为了充分利用bandwidth, 从而use concurrency to overlap latency
+
+<img src="./Note.assets/Screen Shot 2022-01-26 at 7.37.41 PM.png" alt="Screen Shot 2022-01-26 at 7.37.41 PM" style="zoom:50%;" />
+
+<img src="./Note.assets/Screen Shot 2022-01-26 at 7.38.37 PM.png" alt="Screen Shot 2022-01-26 at 7.38.37 PM" style="zoom:50%;" />
 
 
 
@@ -343,18 +355,6 @@ memcpy会发生如下情况。产生bandwidth问题。但是no computation is pe
 
 
 
-#### Little's law for bandwidth concurrency
-
-Concurrency = latency * bandwidth
-
-latency = 10 sec, bandwidth = 2 bytes/sec, concurrency = 20 bytes in flight to hit bandwidth speeds
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 7.37.41 PM.png" alt="Screen Shot 2022-01-26 at 7.37.41 PM" style="zoom:50%;" />
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 7.38.37 PM.png" alt="Screen Shot 2022-01-26 at 7.38.37 PM" style="zoom:50%;" />
-
-
-
 ### Communication Lower Bound on Nested Loop
 
 > Ref
@@ -362,6 +362,8 @@ latency = 10 sec, bandwidth = 2 bytes/sec, concurrency = 20 bytes in flight to h
 > Berkeley CS 267 Lectuer 6
 
 * 是什么
+
+communication = moving data (between main memory and cache, between processor and network)
 
 在nested loop情况下的算法，communication lower bound是什么，在什么情况下才能达到communication lower bound
 
@@ -517,10 +519,24 @@ CNN 可以转化为7 nested loop
 
 
 
-
 #### Multicore Cache Hierchy
 
+> Berkeley CS267 L2
+>
+> CMU 15-618
+
 <img src="Note.assets/Screen Shot 2021-10-17 at 12.17.10 PM.png" alt="Screen Shot 2021-10-17 at 12.17.10 PM" style="zoom:30%;" />
+
+
+
+* larger cache的缺点
+
+1.  Hardware to check longer addresses in cache takes more time
+2. Associativity, which gives a more general set of data in cache, also takes more time
+
+
+
+所以有些机器会为了避免larger cache的问题，eliminate one level of cache
 
 
 
@@ -778,6 +794,8 @@ cache controller工作
 2. update based （当前并不常用）
 
 缺点：Scalability of snooping implementations is limited by ability to broadcast coherence messages to all caches! 因为broadcast消息到其余的processor是有限的，也就限制了num processor可以放在一起。
+
+
 
 ##### MSI Write back invalidation protocol
 

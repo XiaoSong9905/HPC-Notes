@@ -15,7 +15,7 @@
 
 
 
-#### Arithmetic intensiry/computation intensity
+#### Computation Intensity
 
 > Reference
 > 
@@ -34,46 +34,11 @@ actual time to run program
 $$
 f * t_f + m * t_m = f * t_f * (1 + t_m / t_f * 1 / CI)
 $$
-larger CI意味着time closer to $f * t_f$
+larger CI意味着time closer to $f * t_f$ (也就是纯计算的时间)
 
-machine balance $t_m/t_f$ 定义了machine的boundary
+machine balance $t_m/t_f$ (一个硬件限制) 定义了machine的boundary
 
 <img src="./Note.assets/Screen Shot 2022-01-26 at 8.55.45 PM.png" alt="Screen Shot 2022-01-26 at 8.55.45 PM" style="zoom:50%;" />
-
-* potential CI for vector matrix
-
-matrix vector计算的效率很低，因为CI的理论上线只有2
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.08.00 PM.png" alt="Screen Shot 2022-01-26 at 8.08.00 PM" style="zoom:50%;" />
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.07.52 PM.png" alt="Screen Shot 2022-01-26 at 8.07.52 PM" style="zoom:30%;" />
-
-* potential CI for matrix matrix
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.09.07 PM.png" alt="Screen Shot 2022-01-26 at 8.09.07 PM" style="zoom: 33%;" />
-
-naive的方法CI=2
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.09.46 PM.png" alt="Screen Shot 2022-01-26 at 8.09.46 PM" style="zoom:33%;" />
-
-blocked的方法CI=n/N
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.14.23 PM.png" alt="Screen Shot 2022-01-26 at 8.14.23 PM" style="zoom:33%;" />
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.15.44 PM.png" alt="Screen Shot 2022-01-26 at 8.15.44 PM" style="zoom:50%;" />
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.21.47 PM.png" alt="Screen Shot 2022-01-26 at 8.21.47 PM" style="zoom:50%;" />
-
-
-
-
-#### Communication Lower Bound
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.38.25 PM.png" alt="Screen Shot 2022-01-26 at 8.38.25 PM" style="zoom:50%;" />
-
-当使用straness的时候，减少了总的数据移动量
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.42.45 PM.png" alt="Screen Shot 2022-01-26 at 8.42.45 PM" style="zoom:50%;" />
 
 
 
@@ -107,8 +72,9 @@ blocked的方法CI=n/N
 #### Amdahl's law
 
 > Reference
-> 
+>
 > 1. CMU 15.418 l4
+> 1. Berkelet CS267 l1
 
 dependency limit max speedup due to parallisim
 
@@ -117,6 +83,10 @@ speed up will be limited by the fraciton that's not able to parallel
 S = fraction of sequential execution
 
 max speed up < $1 \over S$
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 2.10.21 PM.png" alt="Screen Shot 2022-05-12 at 2.10.21 PM" style="zoom:50%;" />
+
+
 
 
 
@@ -156,6 +126,10 @@ parallel : 多个任务在物理硬件上同时active
 
 
 
+<img src="Note.assets/Screen Shot 2022-05-12 at 2.07.21 PM.png" alt="Screen Shot 2022-05-12 at 2.07.21 PM" style="zoom:50%;" />
+
+
+
 ##### Distributed & Parallel
 
 distributed : 一个master，多个client，一起工作。但是client并不一定一起计算
@@ -189,7 +163,9 @@ clock rate goes up by x -> raw computing power goes up by $x^4$
 
 #### Roofline Model
 
-> Berkeley CS 267 L3
+> 1. Berkeley CS 267 L3
+> 2. 知乎 https://zhuanlan.zhihu.com/p/34204282 
+> 3. Roofline An Insightful Visual Performance Model for Floating-Point Programs and Multicore Architectures
 
 Developed by Sam Williams @ Berkeley, lots of citations, become a verb `rooflien that model`
 
@@ -197,13 +173,35 @@ Idea: application is limited by (1) computation (2) memory bandwidth
 
 <img src="./Note.assets/Screen Shot 2022-01-26 at 8.50.47 PM.png" alt="Screen Shot 2022-01-26 at 8.50.47 PM" style="zoom:30%;" />
 
-* arith perf
 
-横向的是计算intensity，使用SIMD，更好的ILP，balance mul add的目的是为了提升横向线的高度
+
+##### Arithmetic Performance
+
+Y-axis 是 floating point performance
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 9.16.51 PM.png" alt="Screen Shot 2022-05-12 at 9.16.51 PM" style="zoom:50%;" />
 
 <img src="./Note.assets/Screen Shot 2022-01-26 at 8.51.27 PM.png" alt="Screen Shot 2022-01-26 at 8.51.27 PM" style="zoom:30%;" />
 
-* machine balance
+
+
+* 多个roof
+
+1. 告知了应该如何优化代码才能获得最大的improvement
+2. ILP 和SIMD带来提升
+3. add multiply balance带来提升
+
+
+
+##### machine balance
+
+X axis 是 operational intensity
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 9.17.34 PM.png" alt="Screen Shot 2022-05-12 at 9.17.34 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 10.51.57 PM.png" alt="Screen Shot 2022-05-12 at 10.51.57 PM" style="zoom:50%;" />
+
+
 
 <img src="./Note.assets/Screen Shot 2022-01-26 at 8.53.11 PM.png" alt="Screen Shot 2022-01-26 at 8.53.11 PM" style="zoom:30%;" />
 
@@ -213,11 +211,15 @@ machine balance是computration intensity的threshold
 
 横轴是computational intensiry. 
 
+一般是 5-10 FLops/Bytes
+
 Haswell : 10 Flops/Byte
 
 KNL : 7 Flops/Bytes
 
 <img src="./Note.assets/Screen Shot 2022-01-26 at 8.57.15 PM.png" alt="Screen Shot 2022-01-26 at 8.57.15 PM" style="zoom:30%;" />
+
+
 
 * data movement
 
@@ -225,25 +227,81 @@ KNL : 7 Flops/Bytes
 
 是一个upper bound not to exceed
 
-* CI
+
+
+##### CI
 
 <img src="./Note.assets/Screen Shot 2022-01-26 at 8.55.23 PM.png" alt="Screen Shot 2022-01-26 at 8.55.23 PM" style="zoom:30%;" />
 
-* memory bandwidth
+各个操作理论最高CI (assume infinite cache)
 
-使用prefetch，临近内存访问，是为了让bandwidth往左边倾斜，从而更容易comp bound
+<img src="Note.assets/Screen Shot 2022-05-12 at 9.05.18 PM.png" alt="Screen Shot 2022-05-12 at 9.05.18 PM" style="zoom:50%;" />
+
+
+
+
+
+##### memory bandwidth
+
+bandwidth使用左边的斜线表达，斜线总是45 degree slope。bandwidth决定了斜线与横线相交的地方。
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 9.17.12 PM.png" alt="Screen Shot 2022-05-12 at 9.17.12 PM" style="zoom:50%;" />
 
 <img src="Note.assets/Screen Shot 2022-01-26 at 8.59.26 PM.png" alt="Screen Shot 2022-01-26 at 8.59.26 PM" style="zoom:30%;" />
 
 <img src="Note.assets/Screen Shot 2022-01-26 at 9.00.39 PM.png" alt="Screen Shot 2022-01-26 at 9.00.39 PM" style="zoom:33%;" />
 
-* Bounding
+* 多个roof
 
-<img src="Note.assets/Screen Shot 2022-01-26 at 9.00.03 PM.png" alt="Screen Shot 2022-01-26 at 9.00.03 PM" style="zoom:33%;" />
+1. ensure memory affinity : 一个thread的数据都对应processor上（也就是充分利用NUMA结构）
+2. software prefetch
+3. restructure code从而better hardware prefetch
 
-* common result
+
+
+##### Roofline
+
+
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 9.06.23 PM.png" alt="Screen Shot 2022-05-12 at 9.06.23 PM" style="zoom:33%;" />
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 9.07.31 PM.png" alt="Screen Shot 2022-05-12 at 9.07.31 PM" style="zoom:40%;" />
+
+
+
+
+
+<img src="Note.assets/v2-cafb93b9a31fca2d7c84951555762e59_1440w.jpg" alt="img" style="zoom:49%;" />
+
+
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 9.20.48 PM.png" alt="Screen Shot 2022-05-12 at 9.20.48 PM" style="zoom:50%;" />
+
+当处于memory bound的时候，CI告诉我们一个bytes的内存访问我们做多少个arithmetic计算。所以当bandwidth增加（斜率增加），单位时间内能够做的总arithmetic计算就增加了。
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 11.06.43 PM.png" alt="Screen Shot 2022-05-12 at 11.06.43 PM" style="zoom:50%;" />
+
+在蓝色的区域的时候，优化computation
+
+在绿色的区域的时候，优化computation或者memory
+
+在黄色的区域的时候，优化memory
+
+
+
+##### common result
+
+
 
 <img src="Note.assets/Screen Shot 2022-01-26 at 9.02.58 PM.png" alt="Screen Shot 2022-01-26 at 9.02.58 PM" style="zoom:50%;" />
+
+
+
+下面这几个例子都是memory bound的
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 11.07.44 PM.png" alt="Screen Shot 2022-05-12 at 11.07.44 PM" style="zoom:50%;" />
+
+
 
 
 
@@ -270,27 +328,8 @@ GFlops = 1.4 (GHz) * 2 (instruction per cycle) * 8 (8 double float per instricti
 
 
 
-#### Performence Model : Latency and Bandwith Model
+#### Common Computational Methods
 
-> Ref
->
-> Berkeley CS267 Lecture 9
+> Berkeley CS267 L1
 
-$\alpha$ : latency
-
-$\beta$ : inverse of bandwith
-
-$time = \alpha + n * \beta$
-
-
-
-特点：
-
-1. long msgch eaper than many shorter one
-2. one msg time cost = thousands of flops
-
-
-
-注意：对于multi-core cpu来说并非是准确的模型，因为NIC会是bottleneck，但是这个模型没有考虑到NIC Bottleneck
-
- 
+<img src="Note.assets/Screen Shot 2022-05-12 at 2.09.07 PM.png" alt="Screen Shot 2022-05-12 at 2.09.07 PM" style="zoom:50%;" />

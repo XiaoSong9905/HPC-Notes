@@ -289,14 +289,18 @@ for ( int i = 0; i < n; i += 4 )
 sum = sum0 + sum1 + sum2 + sum3;
 ```
 
+
+
 * swap的优化
 
 ```cpp
 // 传统写法
 void swap(int& a, int& b)
+{
   int tmp = a;
   a = b;
   b = tmp;
+}
 
 // 优化ILP写法
 void swap(int &a, int&b)

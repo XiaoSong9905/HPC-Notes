@@ -230,6 +230,7 @@ __global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int wid
 ```
 
 
+
 ## GEMM CPU
 
 ### GEMM CPU gotoBLAS
@@ -315,6 +316,8 @@ $$
 
 这里的A越大，CI越大，amotize memory copy cost越好
 
+
+
 ##### GEBP Refine
 
 * Settings
@@ -362,6 +365,8 @@ pack过的A与GEBP中对应的B进行计算后，不再使用。也就代表着�
 对应GEBP的一个基础计算单元。
 
 A中一个silver的一次读取，以及B(已经是silver)的一次读取，结果应该放在register中。计算出来的$m_r n_r$ 结果
+
+
 
 ##### GEPP
 
@@ -424,6 +429,8 @@ pack后的B(k_c * n) 被多个packed A(m_c, k_c)使用。但是当iterate k到�
 1. $\hat A (m_c * k_c)$ should occupy considerable fraction (实际中是一半) of the smaller of
    1. memory addressable by TLB
    2. L2 cache
+
+
 
 ##### GEMM
 
@@ -499,6 +506,8 @@ iterate through K_C with M_R and N_R : micro kernel
 
 目的是为了更好的使用了cache的spatial locality特点
 
+
+
 ##### 传统的loop
 
 ```cpp
@@ -531,6 +540,8 @@ Case3: $n<C^{\prime} \mathcal{M}^{1 / 2}$ (entire matrix B can fit into cache)
 $Q(n)=\Theta\left(n^{2} / \mathcal{B}\right)$
 
 只要读取一次matrixB，就可以把整个matrixB放在cache里，等遇到下一行A的时候可以继续复用cache里的内容。
+
+
 
 ##### 优化的loop
 
@@ -586,6 +597,8 @@ question：如果是在single core cpu上，parallel是否依旧有效
 2. 比起没有分块的部分，减少了总的内存访问数量. 也就是减少了cache references
 
 Tunning parameter：涉及到分块的时候怎么分。S的大小是什么
+
+
 
 ##### Tiling one level cache
 
@@ -655,6 +668,8 @@ $$
 
 一共有 (n/s)^3 次block计算，每次block计算有 3^3
 
+
+
 * cache analysis on tiled 1 level cache for matrix B
 
 tunning S s.t. submatrix fit into cache $s = \Theta (M^{1\over2})$
@@ -666,16 +681,18 @@ $$
 $$
 对于每一个submatrix来说，整个submatrix在cahche中，也就会产生$\Theta(s^2/B)$ number of cache misses. 一共会有$( n/s)^3$次submatrix计算
 
-* computation intensity on 1 level cache
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.37.43 PM.png" alt="Screen Shot 2022-01-26 at 8.37.43 PM" style="zoom:50%;" />
-
-
 
 
 #### Divide and conquer
 
+> 1. MIT 6.172
+> 2. Berkeley CS267 L2 & L3
+
+
+
 recursive的方法也可以很快，但是一般不如blocked的方法快
+
+
 
 * square matrices 
 
@@ -735,35 +752,13 @@ void mm_dac(double *restrict C, int n_C, \
 
 ![Screen Shot 2021-10-14 at 11.04.25 AM](Note.assets/Screen Shot 2021-10-14 at 11.04.25 AM.png)
 
+
+
 * variation of non-square matrics
 
 这个算法还有variation。可以用于non-square matrices
 
-* work analysis of square matrix
 
-每一个matrix会分解为8个submatrix计算+divide work的constant
-$$
-\begin{aligned}
-\mathrm{Arith}(\mathrm{n}) &=8 \mathrm{~Arith}(\mathrm{n} / 2)+4 * (n/2)^2 \\
-&=2n^3 - n^2
-\end{aligned}
-$$
-
-* data move analysis
-
-<img src="./Note.assets/Screen Shot 2022-01-26 at 8.29.58 PM.png" alt="Screen Shot 2022-01-26 at 8.29.58 PM" style="zoom:30%;" />
-$$
-W(n) = 8 * W(n/2) + 4 * 3(n/2)^2 ~~ \text{if} ~~ 3n^2 > M_{fast} \\ 
-= 3n^2 ~~ \text{if fit into cache}\\
-= O(n^3 / (M_{fast}^{1/2} + n^2 ))
-$$
-4是因为有4个Coo = RMM + RMM pair
-
-3 是因为read 2, write 1在合并C的时候
-
-这里的number of words moved 与tilted的效果一样
-
-这里算出来的数值也是符合communication lower bound的
 
 * cache miss analysis on matrix B (serialized)
 
@@ -779,6 +774,8 @@ $$
 <img src="Note.assets/Screen Shot 2021-10-17 at 6.25.25 PM.png" alt="Screen Shot 2021-10-17 at 6.25.25 PM" style="zoom:30%;" />
 
 总的cache miss与tiling是一样的。是一种efficient cache-oblivious algorithm. 
+
+
 
 * cache miss analusis on matrix B (parallel)
 
@@ -797,39 +794,6 @@ $$
 
 
 
-#### Vectorization
-
-这里只涉及到了使用编译器向量化的方法
-
-* Compile
-
-Clang/LLVM 在 -O2 以上自动使用vector instruction
-
-Clang/LLVM 可以产生 vectorization report 
-
-```shell
-clang -O3 -std=c++11 test.cpp -o test.out -Rpass=vector
-```
-
-可以直接指名使用什么compiler flag
-
-```shell
--mavx
--mavx2
--mfma # multiply-add instruction
--march= # 使用某一个architecture上全部可能的vector instruction
--march=native # 使用当前机器上全部可能的vector instruction
-```
-
-对于float来说，compiler默认不使用向量化，因为要保证数值正确。如果想要在float上面使用compiler vectorization，需要
-
-```shell
--ffast-math
-```
-
-
-
-
 #### Data Layout change
 
 改变data layout，使得读取block的时候是连续的
@@ -839,7 +803,185 @@ clang -O3 -std=c++11 test.cpp -o test.out -Rpass=vector
 
 
 
-#### Strassen's algorithm
+
+### GEMM CPU Berkeley
+
+> Berkeley CS267 L2
+
+
+
+#### Computation Intensity Analysis
+
+下面的分析是为了说明为什么要使用blocking。因为CI会有提升，而CI又影响到整体程序运行时间。
+
+
+
+##### Review of CI
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 2.55.24 PM.png" alt="Screen Shot 2022-05-12 at 2.55.24 PM" style="zoom:50%;" />
+
+
+
+* assumption
+
+1. constant peak computation rate
+2. fast memory 可以放下需要的数据（不考虑cache不够）
+3. cost of fast memory access is 0
+4. memory latency is constant and same
+5. 写入结果到slow memory中有些时候是忽略的
+
+
+
+##### Matrix Vector
+
+matrix vector计算的效率很低，因为CI的理论上线只有2
+
+matrix vector limited by slow memory speed
+
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.08.00 PM.png" alt="Screen Shot 2022-01-26 at 8.08.00 PM" style="zoom:50%;" />
+
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.07.52 PM.png" alt="Screen Shot 2022-01-26 at 8.07.52 PM" style="zoom:30%;" />
+
+
+
+##### Matrix Matrix
+
+* potential CI
+
+computation的计算是每一个 C = C + A * B 涉及到2个操作，for loop一共运行n^3次
+
+memory的计算是读取C A B一次，也就是3n^2 (忽略写入C)。这里没有考虑fast memory, slow memory。 假设的是读取一次slow memory以后都可以放在fast memory上面
+
+potential CI for GEMM 是 O(n)
+
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.09.07 PM.png" alt="Screen Shot 2022-01-26 at 8.09.07 PM" style="zoom: 33%;" />
+
+
+
+* naive
+
+的方法CI=2
+
+computation的值是一样的
+
+memory的计算假设fast memory只能放下3n的数据。
+
+最外面的for loop是关于i，也就是A的，所以读取的每一行A用完以后不需要重新读取
+
+中间的for loop是关于j，也就是B的，因为A便利了n次，所以B整个matrix也需要被读取n次
+
+C(i,j)的读取是在外面两个for loop的里面，所以需要n^2
+
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.09.46 PM.png" alt="Screen Shot 2022-01-26 at 8.09.46 PM" style="zoom:33%;" />
+
+
+
+* blocked
+
+的方法CI=n/N = block size
+
+computation的值是一样的
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 3.14.08 PM.png" alt="Screen Shot 2022-05-12 at 3.14.08 PM" style="zoom:30%;" />
+
+
+
+n是原来matrix的大小
+
+N是block的数量
+
+对于C来说，每一个block使用一次，就不会再使用，所以是2 n^2
+
+对于A B来说，每一个block b^2被读取N^3 (两个来自于iterate C，一个来自于K). N^3 * b^2 = N * n^2
+
+因为CI=b，希望b尽量大，最大被fast memory的大小限制
+
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.14.23 PM.png" alt="Screen Shot 2022-01-26 at 8.14.23 PM" style="zoom: 33%;" />
+
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.15.44 PM.png" alt="Screen Shot 2022-01-26 at 8.15.44 PM" style="zoom:50%;" />
+
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.21.47 PM.png" alt="Screen Shot 2022-01-26 at 8.21.47 PM" style="zoom:50%;" />
+
+
+
+##### Recursive Matrix Matrix
+
+是一种cache oblivious的算法，这种算法一般不如tilning的效果好
+
+<img src="./Note.assets/Screen Shot 2022-01-26 at 8.29.58 PM.png" alt="Screen Shot 2022-01-26 at 8.29.58 PM" style="zoom:30%;" />
+
+* arithmetic (work)
+
+每一个matrix会分解为8个submatrix计算+divide work的constant
+
+$$
+\begin{aligned}
+\mathrm{Arith}(\mathrm{n}) &=8 \mathrm{~Arith}(\mathrm{n} / 2)+4 * (n/2)^2 \\
+&=2n^3 - n^2 \\
+&= 2n^3
+\end{aligned}
+$$
+
+
+* memory (data moved)
+
+$$
+W(n) = 8 * W(n/2) + 4 * 3(n/2)^2 ~~ \text{if} ~~ 3n^2 > M_{fast} \\ 
+= 3n^2 ~~ \text{if fit into cache}\\
+= O(n^3 / (M_{fast}^{1/2} + n^2 ))
+$$
+
+8是因为memory move被分为8个小块
+
+4是因为有4个Cxx = RMM + RMM pair
+
+3 是因为read 2, write 1在合并C的时候
+
+上面的值是not fit in cache的情况下
+
+
+
+3n^2如果fit in cache的话，只用从memory读取一次到cache。
+
+
+
+这里的number of words moved 与tilted的效果一样
+
+这里算出来的数值也是符合communication lower bound的
+
+
+
+#### Communication Lower Bound
+
+对于matmul来说，有一个computational intensity upper bound, 也就有对应的communication (number of words move between slow and fast memory)的lower bound
+
+<img src="Note.assets/Screen Shot 2022-05-12 at 4.47.21 PM.png" alt="Screen Shot 2022-05-12 at 4.47.21 PM" style="zoom:50%;" />
+
+
+
+#### Auto Tunning
+
+##### PHiPAC
+
+developed at berkeley
+
+是一种portable BLAS implementaiton
+
+beat vendor speed
+
+[link](https://www1.icsi.berkeley.edu/~bilmes/phipac/)
+
+
+
+
+
+##### ATLAS
+
+是一种portable BLAS implementation
+
+
+
+#### Strassen Matmul
 
 基于Strassen's algorithm,  基于divide and conquer，只不过只有7个recursion call
 
@@ -849,12 +991,18 @@ work $O(n^{log_2(7)})$ Where 7 来自于只有7个recursion call
 
 
 
+依旧符合communication lower bound，只不过$M_{fast}$上的fraction改变了。
 
-#### Others
+原来是 3 / 2 - 1 = 1/2
 
-还有一些算法上的改变，可以让GEMM做到最优$O(n^{2.32})$,基于类似的divide and conquer想法，只不过分的块数更多
+现在是 log27 / 2 - 1
 
-然而很多fast method并不实际，因为需要非常大的n
+<img src="Note.assets/Screen Shot 2022-05-12 at 4.50.29 PM.png" alt="Screen Shot 2022-05-12 at 4.50.29 PM" style="zoom:50%;" />
+
+
+
+
+
+#### Fast Matmul
 
 <img src="./Note.assets/Screen Shot 2022-01-26 at 8.43.28 PM.png" alt="Screen Shot 2022-01-26 at 8.43.28 PM" style="zoom:50%;" />
-
