@@ -155,7 +155,7 @@ x86
 
 
 
-### Uniprocessor Model
+### Uniprocessor Model / Latency and Bandwidth model / Alpha Beta Model
 
 > Berkeley CS 267 L2
 
@@ -171,11 +171,22 @@ time to load n words = $\alpha + \beta * n$
 特点：
 
 1. long message cheaper than many shorter one
+
 2. one msg time cost = thousands of flops
+
 3. 上面的模型对于single processor是有用的。但是对于multi-processor是不准确的，因为NIC会是bottleneck，但是这个模型没有考虑到NIC Bottleneck
+
 4. memory latency 与 memory bandwidth 之间的gap越来越大。latency fall behind更多
 
+5. alpha >> beta >> time per flop
+
+6. one large message is cheaper than many short ones
+
+   <img src="Note.assets/Screen Shot 2022-05-13 at 1.56.56 PM.png" alt="Screen Shot 2022-05-13 at 1.56.56 PM" style="zoom:50%;" />
+
  
+
+
 
 #### Handling Memory Latency
 
@@ -351,157 +362,6 @@ memcpy会发生如下情况。产生bandwidth问题。但是no computation is pe
 1. 每个processor访问不同内存时间不同
 2. 很大程度受到core通信的interconnect的限制
    1. Intel quickpath QPI
-
-
-
-
-### Communication Lower Bound on Nested Loop
-
-> Ref
->
-> Berkeley CS 267 Lectuer 6
-
-* 是什么
-
-communication = moving data (between main memory and cache, between processor and network)
-
-在nested loop情况下的算法，communication lower bound是什么，在什么情况下才能达到communication lower bound
-
-
-
-* 为什么
-
-memory movement is the most expensive in terms of enegery and speed in computation.
-
-Data movement 的时间很久
-
-data movement占用chip上的大小很大
-
-data movement consume最多的能量
-
-
-
-#### N-body
-
-* 是什么
-
-```cpp
-for i = 1 : n
-  for j = 1 : n
-    F(i) = F(i) + force(A(i), A(j))
-```
-
-可以简化为two nested loop
-
-```cpp
-for i = 1 : n
-  for j = 1 : n
-    access A(i) and B(j)
-```
-
-
-
-* 利用cache进行数据reuse
-
-如果有M大小的cache。则可以读取 M/2 的A， M/2的B，计算(M/2)^2 = M^2/4 次iteration
-
-<img src="Note.assets/Screen Shot 2022-02-10 at 10.52.28 AM.png" alt="Screen Shot 2022-02-10 at 10.52.28 AM" style="zoom:50%;" />
-
-
-
-* communication lower bound
-
-每一次使用cache，可以处理 M^2/4 次iteration。这里的最优解是A B读取的数据一样多，这样映射得到的是square
-
-为了处理 n^2 个iteration，需要读取 n^2 / (M^2/4)  = 4(n/M)^2 次数据从slow memory 到 fast memory
-
-也就需要读取 4(n/M)^2 * M = 4n^2/M 的数据
-
-lower bound = $\Omega (n^2/M)$
-
-
-
-#### GEMM
-
-* 从3D的角度理解GEMM
-
-如果要计算一个C(i, j) 则需要对应的全部的 A B block
-
-<img src="Note.assets/Screen Shot 2022-02-10 at 11.01.24 AM.png" alt="Screen Shot 2022-02-10 at 11.01.24 AM" style="zoom:50%;" />
-
-
-
-* 利用cache进行数据reuse
-
-把对应的A B C都放到cache里
-
-能够同时处理的iteration/3D空间中的cube大小，upper bound by A B C block的面积的square
-
-<img src="Note.assets/Screen Shot 2022-02-10 at 11.02.57 AM.png" alt="Screen Shot 2022-02-10 at 11.02.57 AM" style="zoom:50%;" />
-
-
-
-* communication lower bound
-
-假设cache大小为M，对应的A B C block最大为 $M/3$
-
-对应的cube大小最大为 $((M/3)^3)^{1/2} = M^{3/2}/27$
-
-因为是3 nested loop，总的iteration 数量是 $n^3$，也就是 $n^3/ (M^{3/2}/27)) $个对应的cube。
-
-总共需要读取的数据是 $M * n^3/ (M^{3/2}/27)) = n^3 * 27 / M^{1/2}$
-
-lower bound是 $\Omega( n^3 ) / M^{1/2} $
-
-最优算法对应是cube
-
-
-
-* communication lower bound for parallel case
-
-对于parallel来说，fast memory = local processor memory，slow memory = other processor memory
-
-lower bound on number of read/write = number of words moved between one processor and others
-
-<img src="Note.assets/Screen Shot 2022-02-10 at 11.29.43 AM.png" alt="Screen Shot 2022-02-10 at 11.29.43 AM" style="zoom:50%;" />
-
-
-
-#### General
-
-* communication lower bound
-
-不管多少个loop，不管多少个index，只要能找到如下的映射关系就可以。
-
-需要A的读取，B的读取，C的读取是连续的（可能需要reorder loop）
-
-<img src="Note.assets/Screen Shot 2022-02-10 at 11.31.44 AM.png" alt="Screen Shot 2022-02-10 at 11.31.44 AM" style="zoom:50%;" />
-
-<img src="Note.assets/Screen Shot 2022-02-10 at 11.32.28 AM.png" alt="Screen Shot 2022-02-10 at 11.32.28 AM" style="zoom:50%;" />
-
-
-
-* 是否是实际可行的lower bound
-
-可行，但是取决于loop reorder等性质
-
-<img src="Note.assets/Screen Shot 2022-02-10 at 11.32.49 AM.png" alt="Screen Shot 2022-02-10 at 11.32.49 AM" style="zoom:33%;" />
-
-
-
-#### CNN
-
-* 是什么
-
-CNN 可以转化为7 nested loop
-
-<img src="Note.assets/Screen Shot 2022-02-10 at 11.34.09 AM.png" alt="Screen Shot 2022-02-10 at 11.34.09 AM" style="zoom:50%;" />
-
-
-
-* communication lower bound
-
-<img src="Note.assets/Screen Shot 2022-02-10 at 11.34.26 AM.png" alt="Screen Shot 2022-02-10 at 11.34.26 AM" style="zoom:50%;" />
 
 
 

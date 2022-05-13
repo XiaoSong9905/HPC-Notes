@@ -7,7 +7,7 @@
 > 2. Berkeley CS 267 Lecture 8
 > 3. CMU 15.418 l3
 
-* 三类 parallel model
+
 
 <img src="Note.assets/Screen Shot 2022-02-16 at 10.56.50 PM.png" alt="Screen Shot 2022-02-16 at 10.56.50 PM" style="zoom:30%;" />
 
@@ -22,28 +22,10 @@
    2. 从hardware角度更好实现。
    3. 大多数使用MPI message passing interface. 
    4. 实现：机器间通过通信来交流
-3. Data-parallel model / SIMD
+3. Data-parallel model 
    1. 早期通过SIMD的方法实现
    2. 后面通过map(function, collection)的方法来实现SPMD single program multiple data. 底层通过编译器来转换为SIMD代码。
    3. 常见的两种：gather, scatter
-
-
-
-
-
-
-### cilk
-
-* 特点
-1. 常被用于实现divide and conquer的fork-join model
-2. 有理论最优的scheduling algorithm
-* cilk_spwan
-
-只是声明child可能会paralle运行，但是并不强制。实际是否paralle运行取决于runtime system。与parent的运行关系是asynchronize的。
-
-* cilk_sync
-
-return all calls spawned by current function
 
 
 
@@ -315,15 +297,27 @@ TODO: 不太常用，用到的时候再看
 
 <img src="Note.assets/Screen Shot 2022-02-16 at 11.02.47 PM.png" alt="Screen Shot 2022-02-16 at 11.02.47 PM" style="zoom:33%;" />
 
+
+
 * effective bandwith
 
 bandwith分为理论值和effective bandwith，因为有packet overhead。通常bigger message get better effective bandwith.
 
 effective bandwith很大程度上受到software的影响，因为是sw决定了packet的大小，overhead等等多少。
 
+下面的图展示了使用不同package方法，不同的message size，得到的efficent bandwidth
+
+
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 1.50.06 PM.png" alt="Screen Shot 2022-05-13 at 1.50.06 PM" style="zoom:50%;" />
+
 
 
 * bisection bandwith
+
+最小cut把网络分割成两个部分，cut过的bandwidth有多大
+
+对于n 2 n的算法很重要
 
 <img src="Note.assets/Screen Shot 2022-02-16 at 11.08.00 PM.png" alt="Screen Shot 2022-02-16 at 11.08.00 PM" style="zoom:50%;" />
 
@@ -1050,7 +1044,9 @@ Allgather, Allgatherv, Allreduce, Alltoall, Alltoallv,
 
 
 
-* lower bound
+##### lower bound
+
+on latency and bandwidth
 
 <img src="Note.assets/Screen Shot 2022-02-17 at 10.37.16 AM.png" alt="Screen Shot 2022-02-17 at 10.37.16 AM" style="zoom:50%;" />
 
@@ -1375,8 +1371,7 @@ if (world_rank == 0) {
 
 
 
-
-* Allgather 实现
+##### Allgather 实现
 
 
 MPI定义的是API，但是具体的实现方法可能差异性很大。
@@ -1937,13 +1932,251 @@ MPI_PUT将本进程中从地址origin_addr开始数据类型为origin_datatype �
 
 
 
-### SIMD
+### Data Parallel 
 
-> Berkeley CS267 L2
+> reference
+>
+> 1. Berkeley CS267 L2
+>
+> 2. Berkeley CS 267 L8
 
 
 
-#### x86
+* 实现data parallel的方法
+
+1. SIMD
+2. CUDA
+3. MapReduce
+4. MPI Collectives
+
+
+
+* 是什么
+
+perform the same operation on multiple values ( often array of values )
+
+
+
+* 想法步骤
+
+1. 首先使用ideal cost model找到不同算法parallel的span / work，这个是independent of number of processor的
+2. 然后再考虑如何把algorithm map到硬件上
+
+
+
+#### Ideal Cost Model
+
+做了一些假设，用来说明algorithm在across hardware platform上面的cost lower bound
+
+
+
+* 假设
+
+1. 无限的processor：也就代表cost model is independent of number of processor
+2. control没有overhead
+3. processor之间的communication overhead为0
+
+
+
+* Span代表什么
+
+使用上面假设的machine，需要走多少个iteration才能得到结果
+
+也可以当做time on unbounded number of processor 
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 11.05.46 AM.png" alt="Screen Shot 2022-05-13 at 11.05.46 AM" style="zoom:50%;" />
+
+
+
+* work代表什么
+
+总共进行的binary operation数量
+
+也可以当做time on one processor
+
+例如，serial的时候，reduction是O(n)的work。tree based的时候，reduction的work超过O(n)
+
+
+
+##### 分析 GEMM
+
+span来自于sum n element into 1，根据下面对broadcast部分的分析，知道这个span一定是 O( log n )
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 11.15.15 AM.png" alt="Screen Shot 2022-05-13 at 11.15.15 AM" style="zoom:50%;" />
+
+
+
+#### Common Computation Pattern
+
+
+##### binary operators
+
+array A -> binary operator -> array B
+
+加减乘除
+
+
+
+* ideal cost model analysis
+
+O(1) span
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 11.07.32 AM.png" alt="Screen Shot 2022-05-13 at 11.07.32 AM" style="zoom:50%;" />
+
+
+
+##### broadcast
+
+scalar A broadcast + array B -> binary operator -> array C
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 10.54.37 AM.png" alt="Screen Shot 2022-05-13 at 10.54.37 AM" style="zoom:50%;" />
+
+
+
+* ideal cost model analysis
+
+O(log n) span. 是一个lower bound，不可能再低
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 11.09.37 AM.png" alt="Screen Shot 2022-05-13 at 11.09.37 AM" style="zoom:50%;" />
+
+
+
+可以推导function of n input variable and 1 output variable, binary operation for each number, span lower bound 一定是 O( log n )
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 11.13.18 AM.png" alt="Screen Shot 2022-05-13 at 11.13.18 AM" style="zoom:50%;" />
+
+
+
+##### scatter & gather
+
+<img src="Note.assets/Screen Shot 2022-02-15 at 10.10.48 AM.png" alt="Screen Shot 2022-02-15 at 10.10.48 AM" style="zoom:50%;" />
+
+
+
+##### mask
+
+只对mask=1的部分进行操作，其余的部分mask off
+
+<img src="Note.assets/Screen Shot 2022-02-15 at 10.11.10 AM.png" alt="Screen Shot 2022-02-15 at 10.11.10 AM" style="zoom:50%;" />
+
+
+
+##### reduce
+
+是什么：从多个输入中产生一个输出。 Reduce an array to a value with + or any associative op
+
+注意：因为数据的计算顺序发生改变，可能导致串行结果和并行结果有查表，因为浮点运算不满足结合律与分配率。
+
+为什么使用：dot product最后取一个结果，经常需要这个操作。
+
+work: O(log n) 因为是binary operator
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 10.57.24 AM.png" alt="Screen Shot 2022-05-13 at 10.57.24 AM" style="zoom:50%;" />
+
+
+
+
+
+* ideal cost model analysis
+
+O( log n ) 使用一个tree的结构
+
+
+
+##### scan
+
+是什么：前缀和
+
+
+
+* 通用方法
+1. 每个worker计算一部分的sum
+2. 汇聚每个worker部分的sum （也可以是max，就变成了max scan)
+3. 把汇聚的sum给每个对应的worker，worker基于汇聚的sum(starting value)来计算local scan
+
+<img src="Note.assets/Screen Shot 2022-02-15 at 10.13.56 AM.png" alt="Screen Shot 2022-02-15 at 10.13.56 AM" style="zoom:50%;" />
+
+inclusive 和 exclusive 两种类型
+
+<img src="Note.assets/Screen Shot 2022-02-15 at 10.14.09 AM.png" alt="Screen Shot 2022-02-15 at 10.14.09 AM" style="zoom:50%;" />
+
+
+
+* serial analysis
+
+O(n) work
+
+O(n) span
+
+
+
+#### Parallel Scan
+
+##### Recursive exclusive scan
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 11.23.44 AM.png" alt="Screen Shot 2022-05-13 at 11.23.44 AM" style="zoom:50%;" />
+
+
+
+* ideal cost model analysis
+
+span : 2 log n
+
+work : 2 n
+
+注意：这里尽管parallize了，但是at cost of more work
+
+
+
+* map to hardware
+
+实际上会分为多个processor处理，每个processor内部计算，汇总
+
+processor内部是serial的
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 11.31.37 AM.png" alt="Screen Shot 2022-05-13 at 11.31.37 AM" style="zoom:50%;" />
+
+
+
+##### Non-recursive exclusive scan
+
+Algorithm by Blelloch
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 11.20.58 AM.png" alt="Screen Shot 2022-05-13 at 11.20.58 AM" style="zoom:50%;" />
+
+
+
+* ideal cost model analysis
+
+span : 2 log n
+
+work : 2n
+
+这里的work与serial 版本的prefix scan是相同 O(n)
+
+
+
+#### Parallel Scan Application
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 11.25.45 AM.png" alt="Screen Shot 2022-05-13 at 11.25.45 AM" style="zoom:50%;" />
+
+
+
+TODO: 具体application/算法用到的时候再看讲义补充
+
+
+
+#### SIMD
+
+* 是什么
+
+single control processor control multiple IMU
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 11.02.21 AM.png" alt="Screen Shot 2022-05-13 at 11.02.21 AM" style="zoom:50%;" />
+
+
+
+##### x86
 
 avx2 : 256 bits register, 16 register 
 
@@ -1961,9 +2194,7 @@ x86里向量化操作的clock cycle是与scalar一致的
 
 
 
-
-
-#### arm
+##### arm
 
 TODO 有空补充
 

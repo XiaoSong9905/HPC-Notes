@@ -29,6 +29,25 @@ valgrind --tool=cachegrind ./a.out
 
 
 
+### cilk
+
+* 特点
+1. 常被用于实现divide and conquer的fork-join model
+2. 有理论最优的scheduling algorithm
+
+
+
+* cilk_spwan
+
+只是声明child可能会paralle运行，但是并不强制。实际是否paralle运行取决于runtime system。与parent的运行关系是asynchronize的。
+
+
+
+* cilk_sync
+
+return all calls spawned by current function
+
+
 
 ## Library
 

@@ -36,4 +36,6 @@ CommonAlgorithm.md # contain common algorithm related
 GEMM.md # GEMM related topic
 Convolution.md # Convolution related topic
 CommunicationOptimal.md # communication optimal algorithm (n-body, gemm, conv)
+ParallelMLTraining.md # parallel machine learning training (data parallel, model paralle, operator parallel, stc)
+DenseLinearAlgebra.md # Dense Linear Algebra related. All GEMM topic are placed under GEMM.md
 ```
