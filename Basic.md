@@ -308,7 +308,7 @@ bandwidth使用左边的斜线表达，斜线总是45 degree slope。bandwidth�
 
 #### Theory Peak Performence
 
-performence in GFlops = cpu speed in GHz * number of cpu core * CPU instructions per cycle * number of double float operation per FMA instruction.
+performence in GFlops = cpu speed in GHz * number of cpu core * CPU instructions per cycle (e.g. two AVX512 instruction per cycle) * number of double float operation per FMA instruction.
 
 Flops : floating point operation, usually double precision. 也就是 number of operations
 
@@ -322,9 +322,9 @@ Bytes : size of data ( double precision float is 8 bytes )
 
 1.4 GHz per core
 
-2 512 bits vector unit ( 2 instrction per cycle )
+2 512 bits vector unit ( 2 vector processing unit per cycle )
 
-GFlops = 1.4 (GHz) * 2 (instruction per cycle) * 8 (8 double float per instriction) * 2 (fma count as 2 instruction)
+GFlops = 1.4 (GHz) * 2 (vector processing unit per cycle) * 8 (8 double float per AVX512) * 2 (fma count as 2 instruction)
 
 
 

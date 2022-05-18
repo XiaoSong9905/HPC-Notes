@@ -1,4 +1,261 @@
-# GEMM
+# Dense Linear Algebra and Communication Lower Bound
+
+> .md 文件中更加关注算法的分析角度
+>
+> 详细算法分析参考对应算法批注文件
+
+
+
+
+## Communication Lower Bound on Nested Loop
+
+> Reference
+>
+> Berkeley CS 267 Lectuer 6 b
+
+* 是什么
+
+communication = moving data (between main memory and cache, between processor and network)
+
+在nested loop情况下的算法，communication lower bound是什么，在什么情况下才能达到communication lower bound
+
+
+
+* 为什么关注
+
+memory movement is the most expensive in terms of enegery and speed in computation.
+
+Data movement 的时间很久
+
+data movement占用chip上的大小很大
+
+data movement consume最多的能量
+
+
+
+### N-body
+
+#### 是什么
+
+```cpp
+// Force角度
+for i = 1 : n
+  for j = 1 : n
+    F(i) = F(i) + force(A(i), A(j))
+
+// Potential角度
+for i = 1 : n
+  for j = 1 : n
+    e = e + potential( A(i), B(j) )
+```
+
+可以简化为two nested loop
+
+```cpp
+for i = 1 : n
+  for j = 1 : n
+    access A(i) and B(j)
+```
+
+
+
+* 利用cache进行数据reuse
+
+如果有M大小的cache。则可以读取 M/2 的A， M/2的B，计算(M/2)^2 = M^2/4 次iteration
+
+<img src="Note.assets/Screen Shot 2022-02-10 at 10.52.28 AM.png" alt="Screen Shot 2022-02-10 at 10.52.28 AM" style="zoom:50%;" />
+
+
+
+optimal的情况下，读取多个tile，每一个tile都是square
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 10.17.27 AM.png" alt="Screen Shot 2022-05-13 at 10.17.27 AM" style="zoom:40%;" />
+
+
+
+#### communication lower bound
+
+每一次使用cache，可以处理 M^2/4 次iteration。这里的最优解是A B读取的数据一样多，这样映射得到的是square
+
+为了处理 n^2 个iteration，需要读取 n^2 / (M^2/4)  = 4(n/M)^2 次数据从slow memory 到 fast memory
+
+也就需要读取 4(n/M)^2 * M = 4n^2/M 的数据
+
+lower bound = $\Omega (n^2/M) = \Omega( \text{\# loop iterations inside for loop } / M )$
+
+
+
+### GEMM
+
+* 对比n-body
+
+在n-body里面，找到了给定cache大小，如何放输入（sqaure的放），能够让cache内数据运行的iteration数量最多。在GEMM里面同样找到如何充分利用cache的方法，从而每一次cache里运行的iteration数量最大，从而达到communication lower bound
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 10.21.19 AM.png" alt="Screen Shot 2022-05-13 at 10.21.19 AM" style="zoom:40%;" />
+
+
+
+#### 从3D的角度理解GEMM
+
+如果要计算一个C(i, j) 则需要对应的全部的 A B block
+
+<img src="Note.assets/Screen Shot 2022-02-10 at 11.01.24 AM.png" alt="Screen Shot 2022-02-10 at 11.01.24 AM" style="zoom:50%;" />
+
+
+
+* 利用cache进行数据reuse
+
+把对应的A B C的一个square都放到cache里
+
+一次cache能够同时处理的iteration/3D空间中的cube大小，upper bound by A B C block的面积的square。右边的图片显示了upper bound，左边的图片是equal
+
+<img src="Note.assets/Screen Shot 2022-02-10 at 11.02.57 AM.png" alt="Screen Shot 2022-02-10 at 11.02.57 AM" style="zoom:50%;" />
+
+
+
+#### communication lower bound
+
+* serial case
+
+假设cache大小为M，对应的A B C block最大为 $M/3$
+
+对应的cube大小最大为 $((M/3)^3)^{1/2} = M^{3/2}/27$
+
+因为是3 nested loop，总的iteration 数量是 $n^3$，也就是需要reload cache $n^3/ (M^{3/2}/27)) $次。
+
+总共需要读取的数据是 $M * n^3/ (M^{3/2}/27)) = n^3 * 27 / M^{1/2}$
+
+lower bound是 $\Omega( n^3  / M^{1/2}) $，这个值与关于matmul comm lower bound Theorem (Hong & Kung 1981) 一致
+
+最优算法对应是cube
+
+
+
+* parallel case
+
+需要注意的是，这里假设 M = 3n^2 / p 代表one copy of each matrix
+
+attainable through SUMMA, Cannon's Algorithm
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 10.27.35 AM.png" alt="Screen Shot 2022-05-13 at 10.27.35 AM" style="zoom:50%;" />
+
+
+
+这里对应的number of word moved 代表从slow memory移动到fast memory的数量。也就是从other processor memory移动到当前processor memory数据的数量。
+
+recall, SUMMA里面在每个iteration，每个processor都会给同group的processor发送数据，这个发送数据的总量就是number of word moved. 
+
+
+
+### General
+
+#### communication lower bound
+
+不管多少个loop，不管多少个index，只要能找到如下的映射关系就可以。
+
+需要A的读取，B的读取，C的读取是连续的（可能需要reorder loop）
+
+<img src="Note.assets/Screen Shot 2022-02-10 at 11.31.44 AM.png" alt="Screen Shot 2022-02-10 at 11.31.44 AM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-02-10 at 11.32.28 AM.png" alt="Screen Shot 2022-02-10 at 11.32.28 AM" style="zoom:50%;" />
+
+
+
+* 是否是实际可行的lower bound
+
+可行，但是取决于loop reorder，loop dependency等性质
+
+<img src="Note.assets/Screen Shot 2022-02-10 at 11.32.49 AM.png" alt="Screen Shot 2022-02-10 at 11.32.49 AM" style="zoom:33%;" />
+
+
+
+### CNN
+
+* 是什么
+
+CNN 可以转化为7 nested loop
+
+<img src="Note.assets/Screen Shot 2022-02-10 at 11.34.09 AM.png" alt="Screen Shot 2022-02-10 at 11.34.09 AM" style="zoom:50%;" />
+
+
+
+* communication lower bound
+
+<img src="Note.assets/Screen Shot 2022-02-10 at 11.34.26 AM.png" alt="Screen Shot 2022-02-10 at 11.34.26 AM" style="zoom:50%;" />
+
+
+
+
+## Dense Linear Algebra
+
+> Reference
+>
+> 1. UC Berkeley CS267 Lecture 13
+> 2. UC Berkeley CS 267 Lecture 14
+
+
+
+### 包含什么
+
+![Screen Shot 2022-05-13 at 2.13.34 PM](Note.assets/Screen Shot 2022-05-13 at 2.13.34 PM.png)
+
+
+
+BLAS 1: do O(n) operation on O(n) data
+
+BLAS 2: do O(n^2) operation on O(n^2) data
+
+BLAS 3: do O(n^3) operations on O(n^2) data
+
+
+
+LAPACK: linear algebra package, use BLAS3, possible parallel in shared memory =
+
+ScaLAPACK : scalable LAPACK, for distributed memory through MPI
+
+
+
+### Communication Lower Bound
+
+#### 2D Matrix Multiplication
+
+这里number of word moved 代表从slow memory移动到fast memory的数据的数量。也就是从ram移动到cache的数据的数量
+
+这里number of message send 代表发送了多少个消息。在这个情况下也就是reload了多少次cache（从slow memory给fast memory发送消息）。
+
+number of word moved = number of message send * number of word per message.
+
+
+
+目的：minimize number of words moved & minimize number of message send
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 9.37.27 PM.png" alt="Screen Shot 2022-05-13 at 9.37.27 PM" style="zoom:40%;" />
+
+带入到GEMM的例子里
+
+<img src="Note.assets/Screen Shot 2022-05-13 at 9.38.25 PM.png" alt="Screen Shot 2022-05-13 at 9.38.25 PM" style="zoom:40%;" />
+
+<img src="Note.assets/Screen Shot 2022-05-17 at 10.40.44 PM.png" alt="Screen Shot 2022-05-17 at 10.40.44 PM" style="zoom:50%;" />
+
+
+
+#### 2.5D matrix multiplication
+
+<img src="Note.assets/Screen Shot 2022-05-17 at 10.53.16 PM.png" alt="Screen Shot 2022-05-17 at 10.53.16 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-05-17 at 10.55.40 PM.png" alt="Screen Shot 2022-05-17 at 10.55.40 PM" style="zoom:50%;" />
+
+
+
+#### Strassen's Matrix multiplication
+
+也是可以套用上面的公式，只不过constant改变了
+
+<img src="Note.assets/Screen Shot 2022-05-17 at 10.56.19 PM.png" alt="Screen Shot 2022-05-17 at 10.56.19 PM" style="zoom:50%;" />
+
+
+
+
 
 ## GEMM GPU
 
@@ -72,6 +329,8 @@ __global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int wid
 }
 ```
 
+
+
 * bandwidth 分析
 
 Load 1 N 1 M element : 4 bytes each, total 8 bytes
@@ -91,6 +350,8 @@ Load 1 N 1 M element : 4 bytes each, total 8 bytes
 并没有充分的利用computation
 
 在实际的运算中，memory并不是总busy，所以实际上代码只能运行在25GFLOPs左右
+
+
 
 ##### use shared memory
 
@@ -154,6 +415,8 @@ __global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int wid
 
 内存带宽不再是限制。
 
+
+
 ##### handle boundary
 
 如果data并不是TILE_WIDTH的整数倍，需要解决boundary的问题
@@ -183,6 +446,8 @@ __global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int wid
 2. test during tile store
 
 如果value p outiside valid range, 则不写入。
+
+
 
 * 有关branch divergence
 
@@ -237,269 +502,12 @@ __global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int wid
 
 > 基于论文 Anatomy of High-Performance Matrix Multiplication
 > 
-> 是一种Tiled的方法 
-
-* Setting
-
-C : M * N (row * col)
-
-A : M * K (row * col)
-
-B : K * N (row * col)
-
-Bj : K * nr (对应多个col)
-
-Cj : 对应多个row
-
-* GEMM 多种拆分方式
-
-如果数据是col major的话，对应Fig8的算法比较好
-
-如果数据是row major的话，对应Fig10的算法比较好
-
-
-
-
-#### Best Algo
-
-在col major的条件下最优算法
-
-![Screen Shot 2022-01-21 at 11.23.27 PM](Note.assets/Screen Shot 2022-01-21 at 11.23.27 PM.png)
-
-![Screen Shot 2022-01-21 at 11.09.39 PM](Note.assets/Screen Shot 2022-01-21 at 11.09.39 PM.png)
-
-![Screen Shot 2022-01-21 at 11.10.00 PM](Note.assets/Screen Shot 2022-01-21 at 11.10.00 PM.png)
-
-![Screen Shot 2022-01-21 at 11.10.13 PM](Note.assets/Screen Shot 2022-01-21 at 11.10.13 PM.png)
-
-![Screen Shot 2022-01-22 at 1.24.19 AM](Note.assets/Screen Shot 2022-01-22 at 1.24.19 AM.png)
-
-![Screen Shot 2022-01-22 at 1.24.31 AM](Note.assets/Screen Shot 2022-01-22 at 1.24.31 AM.png)
-
-
-
-
-#### Process
-
-##### GEBP Simple
-
-* Setting
-
-A : $m_c * k_c$
-
-B : $k_c * n$
-
-C :$m_c * n$
-
-$B_j$ : $k_c * n_r$ 也就是上面的红色的silver
-
-$C_j : m_c * n_r$ 也就是上面多个绿色格子会组成一个silver
-
-* Model
-
-<img src="Note.assets/Screen Shot 2022-01-21 at 11.21.47 PM.png" alt="Screen Shot 2022-01-21 at 11.21.47 PM" style="zoom:30%;" />
-
-* Algorithm
-
-<img src="Note.assets/Screen Shot 2022-01-21 at 11.26.10 PM.png" alt="Screen Shot 2022-01-21 at 11.26.10 PM" style="zoom:50%;" />
-
-* Assumptions
-1. $m_c$, $k_c$ are small enough
-   1. A, $n_r$ col of B ($B_j$), $n_r$ row of C ($C_j$) fit into cache
-2. if $A, B_j, C_j$ can fit into cache, then cpu can compute at peak speed
-3. if A remain in cache, it remian there until no longer needed
-* Computation intensity
-
-$$
-{2m_ck_c \over 2m_c + k_c}
-$$
-
-这里的A越大，CI越大，amotize memory copy cost越好
-
-
-
-##### GEBP Refine
-
-* Settings
-
-T : T TLB entries
-
-$T_a$ number of TLB entries devoted to matrix A
-
-* Model
-
-<img src="Note.assets/Screen Shot 2022-01-21 at 11.42.57 PM.png" alt="Screen Shot 2022-01-21 at 11.42.57 PM" style="zoom:30%;" />
-
-* cache layer
-
-为了尽量的让A大，从而让上面的computation intensiry大。A 放在L2 cache中，$B_j, C_j$ 在L1 cache中
-
-1. 为了让A从L2到register不是计算的限制 $n_r \geq {R_{comp} \over 2 R_{load}} $, $R_{comp}$ 计算浮点数的速度, $R_{load}$ 数据从L2到register的速度
-* TLB constrain
-1. no TLB miss when computing GEBP
-   1. $A, B_j, C_j$ are small enough
-2. if A is address by the TLB, it remains so until no longer needed
-* Packing
-
-在GEBP中的A通常是更大的矩阵中的一部分，也就意味着A的内存可能是不连续的。所以要 pack A into $\hat A$
-
-Packing并不产生额外overhead，因为本身把A晕倒L2 cache里面就需要做一样多的内存拷贝。
-
-因为每一个$B_j$都与A进行计算，所以A有很多数据复用，可以进行pack。
-
-<img src="Note.assets/Screen Shot 2022-01-21 at 11.59.43 PM.png" alt="Screen Shot 2022-01-21 at 11.59.43 PM" style="zoom:30%;" />
-
-A的大小是$m_c k_c$, 被横向切分为多个$m_r k_c$的silver.
-
-pack A的方法是让 $m_r k_c$ submatrix 纵向 contigious in memory （蓝色格子中的白色的线）
-
-pack过的A与GEBP中对应的B进行计算后，不再使用。也就代表着多个pack A可以在一个tmp buffer中。
-
-1. TLB is limited fatcor：GEBP循环一次所计算的大小需要能够放在TLB寻址空间内。
-   
-   1. $T_{\hat A} + 2 ( T_{B_j} + T_{C_j}) \leq T$ : TLB 需要能放下A以及两个Bj Cj，之所以是两个是为了避免在增加新的的时候把A evict
-* Register Blocking
-
-<img src="Note.assets/Screen Shot 2022-01-21 at 11.55.55 PM.png" alt="Screen Shot 2022-01-21 at 11.55.55 PM" style="zoom:50%;" />
-
-对应GEBP的一个基础计算单元。
-
-A中一个silver的一次读取，以及B(已经是silver)的一次读取，结果应该放在register中。计算出来的$m_r n_r$ 结果
-
-
-
-##### GEPP
-
-* Algorithm
-
-![Screen Shot 2022-01-21 at 11.42.33 PM](Note.assets/Screen Shot 2022-01-21 at 11.42.33 PM.png)
-
-* packing B
-
-pack B into $\hat B$ ，因为B被多个$A_x$使用
-
-<img src="Note.assets/Screen Shot 2022-01-22 at 12.00.58 AM.png" alt="Screen Shot 2022-01-22 at 12.00.58 AM" style="zoom:30%;" />
-
-<img src="Note.assets/Screen Shot 2022-01-21 at 11.59.43 PM.png" alt="Screen Shot 2022-01-21 at 11.59.43 PM" style="zoom:30%;" />
-
-<img src="Note.assets/Screen Shot 2022-01-28 at 10.32.42 PM.png" alt="Screen Shot 2022-01-28 at 10.32.42 PM" style="zoom:50%;" />
-
-B的大小是$k_c n$, 被竖向切分为很多个$k_c n_r$的silver
-
-pack B的方法是让$k_c n_r$ submatrix横向contigious in memory(红色格子中白色的线)
-
-pack后的B(k_c * n) 被多个packed A(m_c, k_c)使用。但是当iterate k到下一个B(k_c, n)的时候，上一个pack的B就不再被使用了，所以多个packed B可以放在同一个memory buffer中。
-
-不pack C是可以的，因为C没有在GEPP中被多次使用。但是在GEMM分解为多个GEPP的时候，每一个GEPP都会对整个C进行一次写入。
-
-也就是只pack reuse的数据
-
-之所以对col major友好是因为$C_{aux}$ 在存的时候是竖着的，更能利用col major
-
-* Constrain on $m_r n_r$
-
-> m_r * n_r 占用一半的register，但是一般是4x4, 8x8, 16x8, 16x12， 所以没有关系
-> 
-> m_r n_r 尽可能一样大
-> 
-> n_r的最小值受到L2 cache speed的限制，但是由于一般n_r最小是4，所以也没有关系
-
-1. $m_r * n_r$ submatrix (绿色的block)中占用一半的register，剩下的register用于prefetching A silver（蓝色的）和B silver（红色的）
-   1. 一般是 $4*4$ 或者$8*8$, 努力用掉尽可能多的寄存器
-2. $m_r$ ≈ $n_r$ 最好的amortize cost of loading registers
-3. $n_r \geq {R_{comp} \over 2 R_{load}} $ 避免A从L2 cache到register的时间成为阻挡，也就是限制了$n_r$的最小值。
-* constrain on $k_c$
-
-> k_c应该尽量大，这是增加IC的方法。有些甚至存在k_c=3k。一般k_c=256
-> 
-> Bj (nr * kc) 小于 TLB一半
-> 
-> Bj (nr * kc) 小于 L1cache一半
-> 
-> k_c 按照经验是page size一半
-
-1. 应该尽量的大
-2. $B_j$(红色的格子)需要能够放在L1中（因为A中多个蓝色的格子都会与$B_j$这个红色的格子相乘，所以需要红色的格子靠近register），这受到了L1大小的限制 （因为L1还要存silver A 蓝色的格子，还有C 绿色的格子），以及set associativity的限制。一般 $k_c * n_r (B_j) \leq {1\over2}$ L1 cache 
-3. $\hat A (m_c * k_c)$ should occupy considerable fraction of L2 cache 
-4. $k_c$ double precision float occupy half of a page
-* constrain on $m_c$
-
-> A($m_c * k_c$)应该尽量大，占用L2 cache的一半
-
-1. $\hat A (m_c * k_c)$ should occupy considerable fraction (实际中是一半) of the smaller of
-   1. memory addressable by TLB
-   2. L2 cache
-
-
-
-##### GEMM
-
-> 参考 AHPMM Note.pdf
-
-* Algorithm
-1. iterate through K in step k_c.  num k_c 有多少个，C就被重复读取写入多少次
-
-<img src="Note.assets/Screen Shot 2022-01-28 at 10.32.18 PM.png" alt="Screen Shot 2022-01-28 at 10.32.18 PM" style="zoom:50%;" />
-
-* 整体算法overview
-
-for ( K in step K_C )
-
-pack b
-
-for (M in step M_C)
-
-pack a
-
-for (N in step N_R) : GEBP
-
-for (M_C in step M_R)
-
-iterate through K_C with M_R and N_R : micro kernel
-
-
-
-
-#### BLIS
-
-* difference
-
-对N进行了N_C的切分. 为了让block B(k_c, n_c)相对较小，从而pack B不至于占用太多空间+pack B可以放在L3 cache里面
-
-因为对matrix A进行多次读取（iterate along N的时候），所以pack A可以考虑pack到与A一样大的一块空间，这样第二次read整个A的时候，就是连续内存读取了。
-
-* 整体算法overview
-
-for (N in step N_C)
-
-for ( K in step K_C )
-
-pack b
-
-for (M in step M_C)
-
-pack a
-
-for (N_C in step N_R) : GEBP
-
-for (M_C in step M_R)
-
-iterate through K_C with M_R and N_R : micro kernel
+> 具体内容参考论文及批注
 
 
 
 
 ### GEMM CPU MIT
-
-> 参考
-> 
-> 1. MIT 6.172 Lecture1, algorithm部分
-> 2. https://www.cs.mcgill.ca/~pnguyen/251F09/matrix-mult.pdf （非常好，证明+讲的很详细）
-> 3. https://en.wikipedia.org/wiki/Matrix_multiplication_algorithm
-> 4. MIT 6.172 lecture 14, cache analysis部分
-> 5. Berkeley CS 267 L3, divide and conquer分析部分，stranssen algo
-
-
 
 
 #### Loop Reordering
@@ -683,12 +691,10 @@ $$
 
 
 
-#### Divide and conquer
+### GEMM CPU Cache-Oblivious
 
 > 1. MIT 6.172
 > 2. Berkeley CS267 L2 & L3
-
-
 
 recursive的方法也可以很快，但是一般不如blocked的方法快
 
@@ -1006,3 +1012,42 @@ work $O(n^{log_2(7)})$ Where 7 来自于只有7个recursion call
 #### Fast Matmul
 
 <img src="./Note.assets/Screen Shot 2022-01-26 at 8.43.28 PM.png" alt="Screen Shot 2022-01-26 at 8.43.28 PM" style="zoom:50%;" />
+
+
+
+### GEMM CPU Parallel Berkeley
+
+> Berkley CS267 Lecture 13
+
+
+
+* 算法 that  attain lower bound 
+
+1. SUMMA
+   1. Attains communication lower bounds (within log p)
+   2. used in Parallel BLAS implementation
+2. Cannon
+   1. More assumption
+3. 2.5D SUMMA
+
+
+
+#### SUMMA Algorithm Overview 
+
+<img src="Note.assets/Screen Shot 2022-05-17 at 10.51.39 PM.png" alt="Screen Shot 2022-05-17 at 10.51.39 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-05-17 at 10.51.50 PM.png" alt="Screen Shot 2022-05-17 at 10.51.50 PM" style="zoom:50%;" />
+
+
+
+#### Communication Lower Bound 
+
+<img src="Note.assets/Screen Shot 2022-05-17 at 10.52.13 PM.png" alt="Screen Shot 2022-05-17 at 10.52.13 PM" style="zoom:50%;" />
+
+
+
+#### 2.5D SUMMA
+
+<img src="Note.assets/Screen Shot 2022-05-17 at 10.54.10 PM.png" alt="Screen Shot 2022-05-17 at 10.54.10 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-05-17 at 10.54.23 PM.png" alt="Screen Shot 2022-05-17 at 10.54.23 PM" style="zoom:50%;" />
