@@ -26,7 +26,7 @@ To open markdown file with better format, [typora](https://typora.io) is recomme
 Resources.md   # Useful resources for learning HPC
 Basic.md # Contain basic knowlege
 OptimizeSerialCode.md # How to optimize serial code
-GPUCUDA.md # CUDA related knowlege
+GPU-CUDA.md # CUDA related knowlege
 Compiler.md # Compiler related optimization
 ThreeParallelModel # 3 parallel model of programming
 Scheduling.md # scheduling related topic

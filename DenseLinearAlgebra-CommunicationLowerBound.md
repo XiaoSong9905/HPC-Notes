@@ -268,7 +268,7 @@ number of word moved = number of message send * number of word per message.
 
 
 
-#### Corr C Code
+#### Simple C Code
 
 注意下面使用到的变量名，后面会都是用类似的变量名
 
@@ -296,23 +296,11 @@ void GEMM(float* M, float* N, float* P, int width)
 
 
 
-
-#### Tile
-
-假设 M N P 是 square matrix
-
-single threads for each P_ij
-
-block size in 2D of TILE_WIDTH * TILE_WIDTH
-
-grid size in 2D of ceil( width / TILE_WIDTH ) * ceil( width / TILE_WIDTH )
-
-<img src="Note.assets/Screen Shot 2021-11-07 at 1.38.09 PM.png" alt="Screen Shot 2021-11-07 at 1.38.09 PM" style="zoom:40%;" />
-
-##### access global memory directly
+#### Simple CUDA Code
 
 ```cpp
-__global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int width )
+__global__ 
+void MatrixKernel( float* d_M, float* d_N, float* d_P, int width )
 {
   int row = blockIdx.y * blockDim.y + threadIdx.y;
   int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -331,7 +319,7 @@ __global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int wid
 
 
 
-* bandwidth 分析
+* bandwidth 分析知道直接访问global memory的话是不够的
 
 Load 1 N 1 M element : 4 bytes each, total 8 bytes
 
@@ -339,13 +327,15 @@ Load 1 N 1 M element : 4 bytes each, total 8 bytes
 
 4 bytes memory access / FLOP 
 
+
+
 假设GPU计算与内存
 
-1000 GFLOP/s
+1000 GFLOP/s computation power
 
-150 GB/s
+150 GB/s memory bandwidth
 
-实际内存 150 GB/s / 4B/FLOP = 37.5 GFLOP/s
+实际computation usage 150 GB/s / (4B/FLOP) = 37.5 GFLOP/s
 
 并没有充分的利用computation
 
@@ -353,11 +343,33 @@ Load 1 N 1 M element : 4 bytes each, total 8 bytes
 
 
 
-##### use shared memory
+上面的分析其实比较简单，更加通用的分析应该从computation intensity出发，从而知道对于每一个bytes access to global memory, 需要how many flops
 
-解决方法：把数据放到shared memory中（速度更快）从而做到数据复用。每一个block负责seprate ties。
 
-每一个thread会负责load 1 M elem，load 1 N elem，write 1 P elem
+
+#### Tile with shared memory
+
+假设 M N P 是 square matrix
+
+single threads for each P_ij, parallize computation of elements of P
+
+block size in 2D of TILE_WIDTH * TILE_WIDTH
+
+grid size in 2D of ceil( width / TILE_WIDTH ) * ceil( width / TILE_WIDTH )
+
+<img src="Note.assets/Screen Shot 2021-11-07 at 1.38.09 PM.png" alt="Screen Shot 2021-11-07 at 1.38.09 PM" style="zoom:40%;" />
+
+
+
+解决方法：把数据放到shared memory中（速度更快）从而做到数据复用。每一个thread block负责计算seprate ties。
+
+<img src="Note.assets/Screen Shot 2022-05-30 at 6.14.43 PM.png" alt="Screen Shot 2022-05-30 at 6.14.43 PM" style="zoom:40%;" />
+
+<img src="Note.assets/Screen Shot 2021-11-07 at 5.03.38 PM.png" alt="Screen Shot 2021-11-07 at 5.03.38 PM" style="zoom:40%;" />
+
+
+
+假设square tile + square matrix的情况。每一个thread会负责load 1 M elem，load 1 N elem，write 1 P elem
 
 当使用了shared memory的时候，第一个想法就是注意需要有synchronize
 
@@ -389,6 +401,7 @@ __global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int wid
     // barrier, wait for all threads load finish
     __syncthreads();
 
+    // This part require data loaded by other threads
     for ( int k = 0; k < TILE_WIDTH; ++k )
       Pvalue += subTileM[ty][k] * subTileN[k][tx];
 
@@ -401,7 +414,9 @@ __global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int wid
 }
 ```
 
-<img src="Note.assets/Screen Shot 2021-11-07 at 5.03.38 PM.png" alt="Screen Shot 2021-11-07 at 5.03.38 PM" style="zoom:40%;" />
+
+
+
 
 * bandwidth 分析
 
@@ -421,6 +436,8 @@ __global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int wid
 
 如果data并不是TILE_WIDTH的整数倍，需要解决boundary的问题
 
+
+
 * 两种boundary的问题
 1. thread 计算有效的p value，但是load global memory的时候会访问out of data. 这个时候应该假设load上来的数据都为0
 
@@ -434,14 +451,19 @@ __global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int wid
 
 <img src="Note.assets/Screen Shot 2021-11-07 at 5.52.43 PM.png" alt="Screen Shot 2021-11-07 at 5.52.43 PM" style="zoom:40%;" />
 
+
+
 * 解决方法
+
 1. test during tile load
 
 如果target within input matrix, load
 
 如果target outside input matrix, put 0
 
-尽管多了一个branching，但是保证了计算部分的代码不会变得复杂
+尽管多了一个branching，但是保证了计算部分的代码不会变得复杂。而且这个branching只会影响到一个warp内的thread，对于大多数thread都是在一个warp内不会导致两个branch都运行
+
+
 
 2. test during tile store
 
