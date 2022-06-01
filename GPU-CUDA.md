@@ -1,9 +1,5 @@
 # GPU
 
-* todo 
-1. branch divergence
-2. GPU 有什么类型的register
-
 
 
 ## Design Principle
@@ -372,6 +368,12 @@ void add(int n, float *x, float *y) {
 
 reuse tile from matrix M for multipel tile N
 
+原来每个thread block用一个tile M和一个tile N进行计算。
+
+现在每个thread block用一个tile M和多个tile N进行计算，复用shared memory里面的tile M，让一个thread block进行多次计算。
+
+`DenseLinearAlgebra-CommunicationLowerBound.md::GEMM-UIUC` 没有考虑这个部分。
+
 <img src="Note.assets/Screen Shot 2022-05-31 at 7.07.46 PM.png" alt="Screen Shot 2022-05-31 at 7.07.46 PM" style="zoom:50%;" />
 
 
@@ -597,7 +599,7 @@ register是有限的，如果使用过多的register，会导致一个SM能够sc
 
 
 
-#### Memory Coalesing
+#### Memory Coalesing and Burst
 
 * 什么是coalesing
 
@@ -644,6 +646,8 @@ bit的capacitance很小，需要使用sense amplifier来放大信号
 **burst** 当访问一个内存位置的时候，多个bit line的数据都会从core array传输到column latches，然后再使用mux来选择传送给bus interace哪个数据 / one burst of memory access to get data that used by multiple attemps to read.
 
 **burst size** 读取一次memory address，会有多少个数据被放到buffer中。
+
+常见的GPU burst size是 1024 bits / 128 bytes. 这里的burst size经常被叫做**line size**
 
 <img src="Note.assets/Screen Shot 2022-05-31 at 12.02.50 AM.png" alt="Screen Shot 2022-05-31 at 12.02.50 AM" style="zoom:50%;" />
 
@@ -755,7 +759,7 @@ modern Double data rate （DDR） bus可以传输two word of data in each clock 
 
 
 
-##### Tiling CUDA code analysis
+##### Tiling CUDA with shard memory analysis
 
 **corner turning** : turned a vertical access pattern into a horizontal access pattern. 
 
@@ -767,5 +771,92 @@ modern Double data rate （DDR） bus可以传输two word of data in each clock 
 
 <img src="Note.assets/Screen Shot 2022-05-31 at 12.10.56 AM.png" alt="Screen Shot 2022-05-31 at 12.10.56 AM" style="zoom:70%;" />
 
+
+
+#### Shared memory
+
+* 是什么
+
+1. on chip
+2. SRAM support random access
+3. don't have constrain of burst like DRAM
+
+
+
+* 什么时候使用
+
+1. 数据有复用的话，考虑使用shared memory
+
+
+
+* 使用时需要注意
+
+1. 使用shared memory一定要注意不要忘记synchronize的使用
+2. shared memory时有限的resource，需要考虑使用shared memory以后一个sm能有多少个thread和block
+
+
+
+
+#### Constant memory
+
+> UIUC 408 Lecture 7
+
+
+##### cache 是什么
+
+GPU Memory line是1024 bits / 128 bytes
+
+cache由多个cache line组成，每个cache line大小与memroy line大小一致，都是128 bytes
+
+
+
+
+
+##### cache 与Shared memory比较
+
+* same
+
+1. both on chip. For volta use same physical resources SRAM
+
+
+
+* different
+
+1. prigrammer control shared memory 
+2. micro-arch determine content of cache
+
+
+
+##### Constant cache
+
+CPU中的cache需要保证cache coherence，所以hw上实现恨无杂。
+
+GPU中因为多线程，实现cache coherence。
+
+GPU有两种cache，L1 cache和constant cache。
+
+
+
+* 特点
+
+1. cosntant cache read only
+2. 被constant memory, texture memory使用
+3. 比起L1 cache，有更大的throughput aceess than L1 cache。尽管latency是一样的，都是5 cycle
+
+
+
+##### Use constant memory
+
+constant memory物理上在global memory上，是off chip的
+
+使用constant memory主要是为了使用constant cache，从而减少对global memory的访问
+
+```cpp
+// constant memory declared outside all function
+__constant__ float Mc[MASK_WIDTH][MASK_WIDTH];
+
+// copy from device to constant memory
+cudaMemcpyToSymbol(Mc, Mask,, MASK_WIDTH*MASK_WIDTH*sizeof(float));
+```
 
 

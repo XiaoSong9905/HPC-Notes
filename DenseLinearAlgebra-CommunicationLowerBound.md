@@ -169,7 +169,7 @@ recall, SUMMA里面在每个iteration，每个processor都会给同group的proce
 
 
 
-### CNN
+### Conv
 
 * 是什么
 
@@ -1073,3 +1073,254 @@ work $O(n^{log_2(7)})$ Where 7 来自于只有7个recursion call
 <img src="Note.assets/Screen Shot 2022-05-17 at 10.54.10 PM.png" alt="Screen Shot 2022-05-17 at 10.54.10 PM" style="zoom:50%;" />
 
 <img src="Note.assets/Screen Shot 2022-05-17 at 10.54.23 PM.png" alt="Screen Shot 2022-05-17 at 10.54.23 PM" style="zoom:50%;" />
+
+
+
+
+## Conv GPU
+
+### Conv GPU UIUC
+> Reference
+> 1. PMPP Chapter 7
+> 2. UIUC 408 Lecture 7,8,9
+
+
+
+* Defination
+
+Convolution Masks / Filters (这里不用kernel来避免混淆)
+
+
+
+#### Simple 1D Conv
+
+* Math
+
+N 是 input array
+
+M 是mask
+
+P 是output array
+
+如果遇见boundary / ghost element，可以使用zero / padding的方法
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 7.48.24 PM.png" alt="Screen Shot 2022-05-31 at 7.48.24 PM" style="zoom:50%;" />
+
+
+
+* CUDA Code
+
+```c
+__global__ 
+void convolution_1D_basic_kernel(float *N, float *M, float *P, int Mask_Width, int Width)
+{ 
+	// every thread in charge of one output element
+	int i = blockIdx.x*blockDim.x + threadIdx.x;
+	float Pvalue = 0;
+	int N_start_point = i - (Mask_Width/2);
+	
+  // iterate through filter
+	for (int j = 0; j < Mask_Width; j++) 
+	{
+  	if (((N_start_point + j) >= 0) && ((N_start_point + j) < Width)) 
+  	{
+  		Pvalue += N[N_start_point + j]*M[j];
+ 	 	} 
+ 	} 
+} 
+```
+
+
+
+#### Simple 2D Conv
+
+* Math
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 7.50.55 PM.png" alt="Screen Shot 2022-05-31 at 7.50.55 PM" style="zoom:50%;" />
+
+
+
+#### Constant Memory for Filter 
+
+```cpp
+// global variable, outside any kernel/function
+__constant__ float Mc[MASK_WIDTH][MASK_WIDTH];
+
+// Initialize Mask
+float Mask[MASK_WIDTH][MASK_WIDTH];
+for(unsigned int i = 0; i < MASK_WIDTH * MASK_WIDTH; i++) {
+  Mask[i] = (rand() / (float)RAND_MAX);
+  if(rand() % 2) Mask[i] = - Mask[i];
+}
+
+// Copy from host to device constant memory
+cudaMemcpyToSymbol(Mc, Mask, MASK_WIDTH*MASK_WIDTH*sizeof(float));
+
+// launch kernel
+// constant memory is visible to all kernel functions throughout application lifetime
+ConvolutionKernel<<<dimGrid, dimBlock>>>(Nd, Pd);
+```
+
+
+
+#### 3 Strategy for Tile
+
+input数据存在复用，所以可以使用shared memory来减少对global memory的总访问次数
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.50.23 PM.png" alt="Screen Shot 2022-05-31 at 9.50.23 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.50.40 PM.png" alt="Screen Shot 2022-05-31 at 9.50.40 PM" style="zoom:50%;" />
+
+
+
+##### Strategy 1 for 1D
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.51.39 PM.png" alt="Screen Shot 2022-05-31 at 9.51.39 PM" style="zoom:50%;" />
+
+* 特点
+
+1. 总thread个数=总output elem个数
+2. 多个stage/step来load data
+3. halo value放在shared memory中
+4. parallel computation of each output element
+5. 包含strategy1，下面的三个strategy都没有充分的利用shared memory的大小。在UIUC 408的homework里面涉及到了充分利用shared memory的部分
+
+
+
+* adv
+
+1. coalesce global memory access
+2. no branch divergence during computation
+
+
+
+* disadv
+
+1. 使用更多的shared memory
+2. branch divergence during reading data。只有在array两边的warp才会发生divergence的问题
+
+
+
+* 算法 & 代码
+
+1. all thread load data from start of input
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.56.52 PM.png" alt="Screen Shot 2022-05-31 at 9.56.52 PM" style="zoom:50%;" />
+
+
+
+2. 2 * halo threads load remianing data
+
+只有最后的一个warp才会有divergence，前面array的warp都不会走if，也就没有warp divergence
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.57.05 PM.png" alt="Screen Shot 2022-05-31 at 9.57.05 PM" style="zoom:50%;" />
+
+
+
+3. no divergence during computation
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.58.09 PM.png" alt="Screen Shot 2022-05-31 at 9.58.09 PM" style="zoom:70%;" />
+
+
+
+* benifit analysis
+
+下面分析了internal tile的影响，对于含有boundary的tile影响是不一样的
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 10.51.18 PM.png" alt="Screen Shot 2022-05-31 at 10.51.18 PM" style="zoom:50%;" />
+
+reduction ratio for different tile size and tile width
+
+<img src="Note.assets/Screen Shot 2022-06-01 at 11.12.35 AM.png" alt="Screen Shot 2022-06-01 at 11.12.35 AM" style="zoom:50%;" />
+
+
+
+##### Strategy 2 for 2D
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.53.53 PM.png" alt="Screen Shot 2022-05-31 at 9.53.53 PM" style="zoom:50%;" />
+
+
+
+* 特点
+
+1. 总thread个数=总input elem个数
+2. halo value放在shared memory中
+3. some threads (not all) compute output
+4. parallel load memory from global memory to shared memory
+
+
+
+* adv
+
+1. coalesce global memory access
+2. no divergence during read
+
+
+
+* disadv
+
+1. branch divergence during computation
+2. 使用更多的shared memory
+
+
+
+* 算法 & 代码 （2D)
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 10.47.49 PM.png" alt="Screen Shot 2022-05-31 at 10.47.49 PM" style="zoom:50%;" />
+
+复杂的点在于input coordinate map to output coordinate
+
+
+
+* benifit analysis for 2D
+
+<img src="Note.assets/Screen Shot 2022-06-01 at 11.21.36 AM.png" alt="Screen Shot 2022-06-01 at 11.21.36 AM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-06-01 at 11.21.48 AM.png" alt="Screen Shot 2022-06-01 at 11.21.48 AM" style="zoom:50%;" />
+
+
+
+##### Strategy 3 for 1D
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.54.54 PM.png" alt="Screen Shot 2022-05-31 at 9.54.54 PM" style="zoom:50%;" />
+
+* 特点
+
+1. 总thread个数=总output elem
+2. halo value直接从gloabl memory访问
+3. parallel computation of each output element
+
+
+
+* adv
+
+1. 节省shared memory空间
+2. no branch divergence during load memory
+
+
+
+* disadv
+
+1. branch divergence during computation。发生在array左右两边的warp上
+
+
+
+* 算法/代码
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.58.41 PM.png" alt="Screen Shot 2022-05-31 at 9.58.41 PM" style="zoom:50%;" />
+
+
+
+
+
+#### Bandwidth Computation
+
+2022年的GPU需要很大的reuse才能克服bandwidth限制利用computation。
+
+<img src="Note.assets/Screen Shot 2022-06-01 at 11.23.41 AM.png" alt="Screen Shot 2022-06-01 at 11.23.41 AM" style="zoom:50%;" />
+
+
+
+需要很大的mask size才能更好的达到peak performence
+
+<img src="Note.assets/Screen Shot 2022-06-01 at 11.24.22 AM.png" alt="Screen Shot 2022-06-01 at 11.24.22 AM" style="zoom:50%;" /><img src="Note.assets/Screen Shot 2022-06-01 at 11.24.34 AM.png" alt="Screen Shot 2022-06-01 at 11.24.34 AM" style="zoom:50%;" />

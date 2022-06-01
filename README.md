@@ -35,4 +35,5 @@ ToolsLibrary.md # tools and library related
 CommonAlgorithm.md # contain common algorithm related
 DenseLinearAlgebra-CommunicationLowerBound.md # communication optimal algorithm (n-body, gemm, conv) & Dense Linear Algebra related (including GEMM)
 ParallelMLTraining.md # parallel machine learning training (data parallel, model paralle, operator parallel, stc)
+Numerical.md # numerical stability, representation related topics
 ```

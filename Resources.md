@@ -14,6 +14,7 @@
 5. Computer Architecture & System
 6. Compiler
 7. Operating System
+8. linear algebra
 
 
 
@@ -159,6 +160,10 @@
     * 偏向于大型系统的，还是不是单机kernel level优化。
     * 每节课都会学习经典论文，讲授论文的核心思想和难点，是学习理论知识很好的资料。
     * 实验部分四课程精华，实现mapreduce，实现raft
+
+
+
+### Linear Algebra
 
 
 
