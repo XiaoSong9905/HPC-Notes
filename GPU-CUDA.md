@@ -773,6 +773,20 @@ modern Double data rate （DDR） bus可以传输two word of data in each clock 
 
 
 
+##### Padded 2D image
+
+> PMPP Chapter 7
+
+<img src="Note.assets/IMG_463A2479525D-1.jpeg" alt="IMG_463A2479525D-1" style="zoom:50%;" />
+
+当读取image 文件的时候，library经常会padded width = multiply of burst size. 
+
+如果没有padded的话，raw 1的起始位置会是misaligned from DRAM burst，导致读取的时候读取多个burst，让速度变慢
+
+padded info叫做 `pitch` 
+
+
+
 #### Shared memory
 
 * 是什么

@@ -1287,8 +1287,16 @@ reduction ratio for different tile size and tile width
 * 特点
 
 1. 总thread个数=总output elem
-2. halo value直接从gloabl memory访问
-3. parallel computation of each output element
+2. parallel computation of each output element
+3. 只把internal element的部分放在shared memory上。halo value直接从gloabl memory访问 / 从 L2访问
+
+
+
+* Caching
+
+总Fermi开始，就提供L1 L2 cache。L1是per sm的，L2是across SM的。
+
+一个tile的ghost cell data对于nbr tile就是internal element。所以如果tile 0 访问ghost cell data from global memory，有很大的程度数据已经在L2 cache上了，因为tile 1做了blocking，数据被放到L2上。
 
 
 
