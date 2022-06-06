@@ -127,6 +127,18 @@
 
 
 
+### AI Compiler
+
+* course 
+  * Machine Learning Compilation by Tianqi Chen [link](https://mlc.ai/summer22/)
+
+
+
+* book
+  * Open MLSys [github book](https://openmlsys.github.io/chapter_preface/index.html)
+
+
+
 ### GPU CUDA
 
 * Course

@@ -875,12 +875,51 @@ cudaMemcpyToSymbol(Mc, Mask,, MASK_WIDTH*MASK_WIDTH*sizeof(float));
 
 
 
+#### Atomic
+
+> UIUC 508 Lecture 2
+
+GPU atomic随着GPU Arch也在改进
+
+atomic on shared memory >> atomic on global memory 
+
+
+
+* GT200
+
+atomic is on global memory, no L2 cache 
+
+
+
+* Fermi to Kelpler
+
+both atomic on L2 cache
+
+Improve atomic by add more l2 cache buffer 
+
+
+
+* kepler to maxwell
+
+improve shared memory atomic through using hardware. 
+
+Kepler use software for shared memory atomic
+
+
+
+* after maxwell
+
+atomic is rouphly the same
+
+the flexibility of atomic is changed. now have atomic within warp / block.
+
+
+
 ## Common Optimization Techniques
 
 > Reference
 >
 > 1. Algorithm and Data Optimization Techniques for Scaling to Massively Threaded Systems
-> 2. DL A Data Layout Transformation System for Heterogeneous Computing
 
 <img src="Note.assets/Screen Shot 2022-06-04 at 5.09.40 PM.png" alt="Screen Shot 2022-06-04 at 5.09.40 PM" style="zoom:50%;" />
 
@@ -889,6 +928,8 @@ cudaMemcpyToSymbol(Mc, Mask,, MASK_WIDTH*MASK_WIDTH*sizeof(float));
 ### Data Layout Transformation
 
 > Reference
+>
+> DL A Data Layout Transformation System for Heterogeneous Computing
 
 GPU充分利用burst memory是很重要的优化方法
 
@@ -923,6 +964,8 @@ ASTA array of structures of tiled arrays 是一种 SoA的变体。相当于AoS o
 
 ### Scatter to Gather
 
+> UIUC ECE 508 Lecture 2
+
 scatter对于编程来说更加直接
 
 GPU应该避免使用scatter，应该使用gather的方法
@@ -931,9 +974,17 @@ GPU应该避免使用scatter，应该使用gather的方法
 
 
 
+* 是什么
+
+scatter : parallel over input, writing value to non-contigious memory location
+
+gather : parallel over output, reading values from non-contigious memory location。也叫做owner compoutes rules
+
+
+
 * scatter 缺点
 
-1. contentious write (write conflict) 需要被hardware serialize。（下图红色的arrow）
+1. contentious write (write conflict) 需要被hardware serialize。（下图红色的arrow）。当thread多的时候会有很多conflict，write到某一个位置会被serialized
 2. random write无法充分利用memory burst
 3. atomic的arch直到最近才被支持
 
@@ -946,13 +997,89 @@ GPU应该避免使用scatter，应该使用gather的方法
 
 
 
+* 程序特点
+
+1. input一般是irregular的，output一般是regular的。从irregular data映射到regular data是简答的，这也是为什么很多程序是scatter的
+   1. input是particle coordinate(x,y,z), output是3d spatial grid
+2. 有些时候each input只影响有限个output，所以conflict write的影响没有那么大
+
+
+
 * gather缺点
 
-1. 存在overlapping read，但是可以被hardware使用cache来缓解
+1. 存在overlapping read，但是可以被hardware使用cache/shared memory来缓解
 
 
 
 <img src="Note.assets/Screen Shot 2022-06-04 at 9.52.02 PM.png" alt="Screen Shot 2022-06-04 at 9.52.02 PM" style="zoom:50%;" />
+
+
+
+#### Direct Coulombs Summation
+
+irregular input atom and regular output potential grid. Every input influence every output. Given a input atom array, calculate potential on each output grid location.
+
+DCS是最精确的方法，也可以使用其余的方法从而更快，但是就没有这么精确了
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 7.06.24 PM.png" alt="Screen Shot 2022-06-05 at 7.06.24 PM" style="zoom:50%;" />
+
+
+
+##### Scatter C Code
+
+minimize computation by moving loop invariance out of loop
+
+![Screen Shot 2022-06-05 at 7.11.03 PM](Note.assets/Screen Shot 2022-06-05 at 7.11.03 PM.png)
+
+
+
+##### Scatter CUDA Code
+
+替换C code部分的for loop为thread
+
+需要使用CUDA atomic。由于atoimic导致serialization，会慢
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 7.34.22 PM.png" alt="Screen Shot 2022-06-05 at 7.34.22 PM" style="zoom:50%;" />
+
+
+
+##### Gather C Code
+
+存在重复计算varaible
+
+存在重复访问atom array
+
+在C的版本下，比simple scatter版本更慢
+
+对于energygrid的写入更加连续
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 7.35.04 PM.png" alt="Screen Shot 2022-06-05 at 7.35.04 PM" style="zoom:50%;" />
+
+
+
+##### Gather CUDA Code
+
+替换for grid x与for grid y为2d block thread
+
+对于一个warp内的thread来说，同步读取same atom array value，也就只访问一次atom array
+
+写入energygrid充分利用memory burst
+
+对于sequential来说更快的代码（simple scatter），计算量更少的代码，并不一定在parallel上更快
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 7.36.39 PM.png" alt="Screen Shot 2022-06-05 at 7.36.39 PM" style="zoom:50%;" />
+
+
+
+##### Improved Gather C Code
+
+对于CPU代码来说，cache的利用比computation更重要。尽管scatter C code的计算最少，但是并非是对cache利用最好的
+
+问题中energygrid > 20 x atom array。 atom array可以被放在cache里重复读取，但是对energygrid的读取希望只读取一次，因为无法放入在cache里。
+
+C code中更好办法在这个问题里实际上是output oriented的
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 7.43.26 PM.png" alt="Screen Shot 2022-06-05 at 7.43.26 PM" style="zoom:50%;" />
 
 
 
