@@ -1289,6 +1289,7 @@ reduction ratio for different tile size and tile width
 1. 总thread个数=总output elem
 2. parallel computation of each output element
 3. 只把internal element的部分放在shared memory上。halo value直接从gloabl memory访问 / 从 L2访问
+4. 对于recent gpu arch来说，这个方法是prefered的，因为有L2 cache，halo value会被nbr block访问的时候放到L2 cache上
 
 
 

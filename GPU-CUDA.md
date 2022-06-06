@@ -314,31 +314,63 @@ CUDA为了保证transparent scalability，所以不允许block之间的synchroni
 
 
 
-#### Grid-stride loop / thread granularity
+#### Grid-stride loop / thread granularity / thread coarsening 
 
 > Ref
 >
 > 1. Berkeley CS 267 Lecture 7
 > 2. PMPP Chapter 5
+> 3. UIUC 508 Lecture 3
 
 
 
 * 是什么
 
-1. put more work into each thread and use fewer thread原来需要多个thread，现在使用一个threa实现
+1. 原来需要多个thread完成的工作，现在使用一个thread完成，从而减少redundant work （parallel经常会有redundant computation在不同的thread上）
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 7.58.14 PM.png" alt="Screen Shot 2022-06-05 at 7.58.14 PM" style="zoom:50%;" />
 
 
 
 * 优点
 
-1. Eliminating redundant work can ease the pressure on the instruction pro- cessing bandwidth and improve the overall execution speed of the kernel. 对重复工作结果进行服用
+1. Eliminating redundant work can ease the pressure on the instruction processing bandwidth and improve the overall execution speed of the kernel. 对重复工作结果进行复用，从而减少instruction processing stream的贷款限制
+   1. 可以理解为一些会重复的computation，现在shared through register。本来register 是local to each thread, 无法shared across thread的
+   2. 访问register的throughput很大，per thread per cycle可以访问多个register file
+   3. 访问register的latency很小，只有1 clock cycle
+
 2. amortize threads creation/destruction cost
 
 
 
 * 缺点
 
-1. 每个thread使用更多的register，可能导致一个sm内总的thread数量减少（因为register constrain）。导致insufficent amount of parallelism
+1. 每个thread使用更多的register，可能导致一个sm内总的thread数量减少（因为register constrain）。导致insufficent amount of parallelism。
+   1. not enough block per sm to keep sm busy
+   2. not enough block to balance across sm (thread合并了以后，总的thread数量减小，总的block数量也就减少了，而且每个block的时间久了，容易导致imbalance)
+   3. not enough thread to hide latency。通过warp间swap来hide latency，但是当总thread减少，总warp减少
+
+2. larger computation tiles. 产生more padding and wasted computation，一般通过reduce number of thread per block 解决
+   1. 如果一个thread在coarsening以后干了k*k个thread的工作，把原来的block size分别变为width/k和height/k来避免more padding and waste computation
+
+
+
+
+（one output per thread的idle)
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 8.46.53 PM.png" alt="Screen Shot 2022-06-05 at 8.46.53 PM" style="zoom:50%;" />
+
+(two output per thread的idle，更多idle)
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 8.47.17 PM.png" alt="Screen Shot 2022-06-05 at 8.47.17 PM" style="zoom:50%;" />
+
+
+
+
+
+* 为什么使用
+
+increase efficency outweight reduce of parallelism就可以
 
 
 
@@ -362,7 +394,9 @@ void add(int n, float *x, float *y) {
 
 
 
-* 例子2
+##### Example GEMM
+
+
 
 reuse tile from matrix M for multipel tile N
 
@@ -373,6 +407,111 @@ reuse tile from matrix M for multipel tile N
 `DenseLinearAlgebra-CommunicationLowerBound.md::GEMM-UIUC` 没有考虑这个部分。
 
 <img src="Note.assets/Screen Shot 2022-05-31 at 7.07.46 PM.png" alt="Screen Shot 2022-05-31 at 7.07.46 PM" style="zoom:50%;" />
+
+
+
+##### Example DCS
+
+原来：each thread compute one output (见common optimization techiniques - scatter to gather - dcs example )
+
+现在：each thread compute four output
+
+
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 9.39.43 PM.png" alt="Screen Shot 2022-06-05 at 9.39.43 PM" style="zoom:50%;" />
+
+
+
+优点
+
+1. reduce number of load of atoms array by factor of 4
+2. eliminate redundant computation like dxx, dysqpdzsq
+
+
+
+缺点：
+
+1. 使用更多register，现在需要储存4个dxi, 4个energvalxi.
+
+
+
+##### Example 7 point Stencil
+
+stencil难点: memory intense & little computation (one fma per load value)
+
+
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 9.43.18 PM.png" alt="Screen Shot 2022-06-05 at 9.43.18 PM" style="zoom:50%;" />
+
+
+
+* thread coarsening along Z-axis
+
+原来：每个thread计算一个output
+
+现在：每个thread计算pencil along Z dim
+
+效果：
+
+1. 减少grid index的计算。现在可以 x + 1, y + 1 而不是 thread.x block.x blockdim.x 每次重新计算x y
+2. 更少的thread block，更少的thread block scheduling overhead
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 9.50.27 PM.png" alt="Screen Shot 2022-06-05 at 9.50.27 PM" style="zoom:50%;" />
+
+
+
+* register tiling
+
+一个thread计算pencil along z axis，z-axis上的数据复用可以使用register tilning
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.02.38 PM.png" alt="Screen Shot 2022-06-05 at 10.02.38 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.03.03 PM.png" alt="Screen Shot 2022-06-05 at 10.03.03 PM" style="zoom:50%;" />
+
+
+
+效果：
+
+原来一个output需要访问7个input through global memory access
+
+现在一个output需要访问5个input through globlal memory access
+
+节省了25%的global memory bandwidth
+
+
+
+* shared memory tilning 
+
+对于每一个current，都会被xy dim上的4个nbr thread使用。可以使用shared memory来共享这个部分
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.36.28 PM.png" alt="Screen Shot 2022-06-05 at 10.36.28 PM" style="zoom:50%;" />
+
+对于每一个block来说，现在有4 slices of data 在 on-chip memory 上。这是有限的内存，会限制block 的大小
+
+1. prev, curr, next 的 register slices。每一个thread使用3个register，对于block负责x y dim来说，就是3 slides of memory
+2. shared memory of current
+
+
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.38.29 PM.png" alt="Screen Shot 2022-06-05 at 10.38.29 PM" style="zoom:50%;" />
+
+
+
+对于halo来说，使用与conv strategy3类似的方法，访问global memory。更新的gpu arch有更大的across block L2 cache，这些halo cell会被nbr block放到L2 cache里，所以导致的thread divergence不会太严重
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.39.40 PM.png" alt="Screen Shot 2022-06-05 at 10.39.40 PM" style="zoom:50%;" />
+
+
+
+效果：
+
+原来计算一个elem需要访问5个global memory
+
+现在计算一个eleme需要访问1个global memory与4个shared memory
+
+但是由于shared memory与register的限制，block dim不能很大，导致halo的部分影响了reduce ratio
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.41.50 PM.png" alt="Screen Shot 2022-06-05 at 10.41.50 PM" style="zoom:50%;" />
 
 
 
@@ -1015,7 +1154,7 @@ gather : parallel over output, reading values from non-contigious memory locatio
 
 
 
-#### Direct Coulombs Summation
+#### Example Direct Coulombs Summation (DCS)
 
 irregular input atom and regular output potential grid. Every input influence every output. Given a input atom array, calculate potential on each output grid location.
 
@@ -1108,6 +1247,14 @@ on chip storage越大（shared memory越大，tile size越大），越能减少b
 取决于不适用tiling，只使用cache的效果怎么样。
 
 在modern GPU上，cache相对更加复杂+大，所以使用tiling的效果就没有那么多。UIUC 408 Lecture 14里面的例子里，使用tilning只提升了40%左右的速度，原因是因为绝大多数access to global memory都是通过L1 cache的，cache hit rate有98%。
+
+
+
+* 例子
+
+GEMM : `DenseLinearAlgebra-CommunicationLowerBound::GEMM GPU UIUC`
+
+Conv : `DenseLinearAlgebra-CommunicationLowerBound::Conv GPU UIUC` 
 
 
 
