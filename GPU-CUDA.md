@@ -314,207 +314,6 @@ CUDA为了保证transparent scalability，所以不允许block之间的synchroni
 
 
 
-#### Grid-stride loop / thread granularity / thread coarsening 
-
-> Ref
->
-> 1. Berkeley CS 267 Lecture 7
-> 2. PMPP Chapter 5
-> 3. UIUC 508 Lecture 3
-
-
-
-* 是什么
-
-1. 原来需要多个thread完成的工作，现在使用一个thread完成，从而减少redundant work （parallel经常会有redundant computation在不同的thread上）
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 7.58.14 PM.png" alt="Screen Shot 2022-06-05 at 7.58.14 PM" style="zoom:50%;" />
-
-
-
-* 优点
-
-1. Eliminating redundant work can ease the pressure on the instruction processing bandwidth and improve the overall execution speed of the kernel. 对重复工作结果进行复用，从而减少instruction processing stream的贷款限制
-   1. 可以理解为一些会重复的computation，现在shared through register。本来register 是local to each thread, 无法shared across thread的
-   2. 访问register的throughput很大，per thread per cycle可以访问多个register file
-   3. 访问register的latency很小，只有1 clock cycle
-
-2. amortize threads creation/destruction cost
-
-
-
-* 缺点
-
-1. 每个thread使用更多的register，可能导致一个sm内总的thread数量减少（因为register constrain）。导致insufficent amount of parallelism。
-   1. not enough block per sm to keep sm busy
-   2. not enough block to balance across sm (thread合并了以后，总的thread数量减小，总的block数量也就减少了，而且每个block的时间久了，容易导致imbalance)
-   3. not enough thread to hide latency。通过warp间swap来hide latency，但是当总thread减少，总warp减少
-
-2. larger computation tiles. 产生more padding and wasted computation，一般通过reduce number of thread per block 解决
-   1. 如果一个thread在coarsening以后干了k*k个thread的工作，把原来的block size分别变为width/k和height/k来避免more padding and waste computation
-
-
-
-
-（one output per thread的idle)
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 8.46.53 PM.png" alt="Screen Shot 2022-06-05 at 8.46.53 PM" style="zoom:50%;" />
-
-(two output per thread的idle，更多idle)
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 8.47.17 PM.png" alt="Screen Shot 2022-06-05 at 8.47.17 PM" style="zoom:50%;" />
-
-
-
-
-
-* 为什么使用
-
-increase efficency outweight reduce of parallelism就可以
-
-
-
-* 例子1
-
-```cpp
-int numSMs;
-cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, devId);
-add<<<32 * numSMs, blockSize>>>(N, x, y);
-
-// GPU function to add two vectors
-__global__
-void add(int n, float *x, float *y) {
-  int index = blockDim.x * blockIdx.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  // 这里通过for loop对thread进行复用
-  for (int i = index; i < n; i+=stride)
-    y[i] = x[i] + y[i];
-}
-```
-
-
-
-##### Example GEMM
-
-
-
-reuse tile from matrix M for multipel tile N
-
-原来每个thread block用一个tile M和一个tile N进行计算。
-
-现在每个thread block用一个tile M和多个tile N进行计算，复用shared memory里面的tile M，让一个thread block进行多次计算。
-
-`DenseLinearAlgebra-CommunicationLowerBound.md::GEMM-UIUC` 没有考虑这个部分。
-
-<img src="Note.assets/Screen Shot 2022-05-31 at 7.07.46 PM.png" alt="Screen Shot 2022-05-31 at 7.07.46 PM" style="zoom:50%;" />
-
-
-
-##### Example DCS
-
-原来：each thread compute one output (见common optimization techiniques - scatter to gather - dcs example )
-
-现在：each thread compute four output
-
-
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 9.39.43 PM.png" alt="Screen Shot 2022-06-05 at 9.39.43 PM" style="zoom:50%;" />
-
-
-
-优点
-
-1. reduce number of load of atoms array by factor of 4
-2. eliminate redundant computation like dxx, dysqpdzsq
-
-
-
-缺点：
-
-1. 使用更多register，现在需要储存4个dxi, 4个energvalxi.
-
-
-
-##### Example 7 point Stencil
-
-stencil难点: memory intense & little computation (one fma per load value)
-
-
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 9.43.18 PM.png" alt="Screen Shot 2022-06-05 at 9.43.18 PM" style="zoom:50%;" />
-
-
-
-* thread coarsening along Z-axis
-
-原来：每个thread计算一个output
-
-现在：每个thread计算pencil along Z dim
-
-效果：
-
-1. 减少grid index的计算。现在可以 x + 1, y + 1 而不是 thread.x block.x blockdim.x 每次重新计算x y
-2. 更少的thread block，更少的thread block scheduling overhead
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 9.50.27 PM.png" alt="Screen Shot 2022-06-05 at 9.50.27 PM" style="zoom:50%;" />
-
-
-
-* register tiling
-
-一个thread计算pencil along z axis，z-axis上的数据复用可以使用register tilning
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 10.02.38 PM.png" alt="Screen Shot 2022-06-05 at 10.02.38 PM" style="zoom:50%;" />
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 10.03.03 PM.png" alt="Screen Shot 2022-06-05 at 10.03.03 PM" style="zoom:50%;" />
-
-
-
-效果：
-
-原来一个output需要访问7个input through global memory access
-
-现在一个output需要访问5个input through globlal memory access
-
-节省了25%的global memory bandwidth
-
-
-
-* shared memory tilning 
-
-对于每一个current，都会被xy dim上的4个nbr thread使用。可以使用shared memory来共享这个部分
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 10.36.28 PM.png" alt="Screen Shot 2022-06-05 at 10.36.28 PM" style="zoom:50%;" />
-
-对于每一个block来说，现在有4 slices of data 在 on-chip memory 上。这是有限的内存，会限制block 的大小
-
-1. prev, curr, next 的 register slices。每一个thread使用3个register，对于block负责x y dim来说，就是3 slides of memory
-2. shared memory of current
-
-
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 10.38.29 PM.png" alt="Screen Shot 2022-06-05 at 10.38.29 PM" style="zoom:50%;" />
-
-
-
-对于halo来说，使用与conv strategy3类似的方法，访问global memory。更新的gpu arch有更大的across block L2 cache，这些halo cell会被nbr block放到L2 cache里，所以导致的thread divergence不会太严重
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 10.39.40 PM.png" alt="Screen Shot 2022-06-05 at 10.39.40 PM" style="zoom:50%;" />
-
-
-
-效果：
-
-原来计算一个elem需要访问5个global memory
-
-现在计算一个eleme需要访问1个global memory与4个shared memory
-
-但是由于shared memory与register的限制，block dim不能很大，导致halo的部分影响了reduce ratio
-
-<img src="Note.assets/Screen Shot 2022-06-05 at 10.41.50 PM.png" alt="Screen Shot 2022-06-05 at 10.41.50 PM" style="zoom:50%;" />
-
-
-
 
 #### Memory Bandwidth 限制
 
@@ -880,6 +679,8 @@ modern Double data rate （DDR） bus可以传输two word of data in each clock 
 
 ##### Simple CUDA code analysis
 
+对于simple CUDA kernel来说，是使用多个thread+多个iteration的方法来遍历M和N
+
 对于N的访问是coalesced，多个thread在一个step访问的数据是连续的，也就是属于一个burst/充分使用burst
 
 
@@ -888,7 +689,7 @@ modern Double data rate （DDR） bus可以传输two word of data in each clock 
 
 
 
-对于M的访问不是coalesced的，每个thread读取的数据都会导致一次memory burst。Step1的4个value需要4个burst。
+对于M的访问不是coalesced的，每个thread读取的数据都会导致一次memory burst。Step1的4个value需要4个burst。在进行step2的时候，step1的burst被调换，导致memory得重新传输。
 
 需要注意的是，这里使用4个thread+多个iteration来读取数据M，也就对应着simple cuda code
 
@@ -896,11 +697,11 @@ modern Double data rate （DDR） bus可以传输two word of data in each clock 
 
 
 
-##### Tiling CUDA with shard memory analysis
+##### Tiling CUDA with shard memory analysis / corner turning
 
-**corner turning** : turned a vertical access pattern into a horizontal access pattern. 
+**corner turning** : Use of a transposed thread order to allow memory loads to coalesce when loading global to shared.
 
-当使用tilnig+每个thread读取一个M N的时候，读取M也是burst的。这是因为比起上面的simple code使用iteration读取，这里使用多个thread读取，一次burst的数据会被临近的thread使用，而不是下一个iteration被清空。
+当使用tilnig+每个thread读取一个M N到shared memory的时候，读取M也是burst的。这是因为比起上面的simple code使用iteration读取，这里使用多个thread读取，一次burst的数据会被临近的thread使用(M00 M01分别被2个thread读取，每个thread只读取一个M elem)，而不是下一个iteration被清空。
 
 这里对于M没有使用transpose，但是因为使用多个thread读取数据，依旧保证了burst，这与CPU代码需要使用transpose是不一样的。
 
@@ -1255,6 +1056,818 @@ on chip storage越大（shared memory越大，tile size越大），越能减少b
 GEMM : `DenseLinearAlgebra-CommunicationLowerBound::GEMM GPU UIUC`
 
 Conv : `DenseLinearAlgebra-CommunicationLowerBound::Conv GPU UIUC` 
+
+
+
+#### Example GEMM
+
+> 参考
+> 
+> 1. UIUC ECE 408 Lecture4, lecture5, lecture6
+
+
+
+
+##### Simple C Code
+
+注意下面使用到的变量名，后面会都是用类似的变量名
+
+```cpp
+void GEMM(float* M, float* N, float* P, int width)
+{
+  for ( int i = 0; i < width; ++i )
+  {
+    for ( int j = 0; j < width; ++j )
+    {
+      float sum = 0f;
+      for ( int k = 0; k < width; ++k )
+      {
+        float a = M[i * width + k];
+        float b = N[k * width + j];
+        sum += a * b;
+      }
+      P[i * width + j] = sum;
+    }
+  }
+}
+```
+
+<img src="Note.assets/Screen Shot 2021-11-07 at 1.35.19 PM.png" alt="Screen Shot 2021-11-07 at 1.35.19 PM" style="zoom:40%;" />
+
+
+
+##### Simple CUDA Code
+
+```cpp
+__global__ 
+void MatrixKernel( float* d_M, float* d_N, float* d_P, int width )
+{
+  int row = blockIdx.y * blockDim.y + threadIdx.y;
+  int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if ( ( row < width ) && ( col < width ) )
+  {
+    float pval = 0;
+    for ( int k = 0; k < width; ++k )
+    {
+      pval += d_M[ row * width + k ] * d_N[ k * width + col ]; // access global memory
+    }
+    d_P[row * width + col ] = pval; // access global memory
+  }
+}
+```
+
+
+
+* bandwidth 分析知道直接访问global memory的话是不够的
+
+Load 1 N 1 M element : 4 bytes each, total 8 bytes
+
+进行一次计算 2 FLOP 
+
+4 bytes memory access / FLOP 
+
+
+
+假设GPU计算与内存
+
+1000 GFLOP/s computation power
+
+150 GB/s memory bandwidth
+
+实际computation usage 150 GB/s / (4B/FLOP) = 37.5 GFLOP/s
+
+并没有充分的利用computation
+
+在实际的运算中，memory并不是总busy，所以实际上代码只能运行在25GFLOPs左右
+
+
+
+上面的分析其实比较简单，更加通用的分析应该从computation intensity出发，从而知道对于每一个bytes access to global memory, 需要how many flops
+
+
+
+##### Tile with shared memory
+
+假设 M N P 是 square matrix
+
+single threads for each P_ij, parallize computation of elements of P
+
+block size in 2D of TILE_WIDTH * TILE_WIDTH
+
+grid size in 2D of ceil( width / TILE_WIDTH ) * ceil( width / TILE_WIDTH )
+
+<img src="Note.assets/Screen Shot 2021-11-07 at 1.38.09 PM.png" alt="Screen Shot 2021-11-07 at 1.38.09 PM" style="zoom:40%;" />
+
+
+
+解决方法：把数据放到shared memory中（速度更快）从而做到数据复用。每一个thread block负责计算seprate ties。
+
+<img src="Note.assets/Screen Shot 2022-05-30 at 6.14.43 PM.png" alt="Screen Shot 2022-05-30 at 6.14.43 PM" style="zoom:40%;" />
+
+<img src="Note.assets/Screen Shot 2021-11-07 at 5.03.38 PM.png" alt="Screen Shot 2021-11-07 at 5.03.38 PM" style="zoom:40%;" />
+
+
+
+假设square tile + square matrix的情况。每一个thread会负责load 1 M elem，load 1 N elem，write 1 P elem
+
+当使用了shared memory的时候，第一个想法就是注意需要有synchronize
+
+**对于每一个M N中的input数据，通过tile的方法，被复用TILE_WIDTH次。**
+
+```cpp
+__global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int width )
+{
+  __shared__ float subTileM[TILE_WIDTH][TILE_WIDTH];
+  __shared__ float subTilen[TILE_WIDTH][TILE_WIDTH];
+
+  int bx = blockIdx.x;
+  int by = blockIdx.y;
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+
+  // row col 对应着最后的 P 里面的index，也就对应着 M N 里面的Row Col
+  int Row = by * TILE_WIDTH + ty;
+  int Col = bx * TILE_WIDTH + tx;
+  float Pvalue = 0;
+
+    // 一个thread block负责多个tile block
+  for ( int q = 0; q < width / TILD_WIDTH; ++q )
+  {
+    // load data to shared memory
+    subTileM[ty][tx] = M[Row * width + q * TILE_WIDTH + tx];
+    subTileN[ty][tx] = N[(q * TILE_WIDTH+ty)*Width+Col];
+
+    // barrier, wait for all threads load finish
+    __syncthreads();
+
+    // This part require data loaded by other threads
+    for ( int k = 0; k < TILE_WIDTH; ++k )
+      Pvalue += subTileM[ty][k] * subTileN[k][tx];
+
+    // barrier, wait for all threads load finish
+    __syncthreads();
+  }
+
+  // write result
+  P[Row*Width+Col] = Pvalue;
+}
+```
+
+
+
+
+
+* bandwidth 分析
+
+16 * 16 tiles : 对于每一个从global memory读取的数据，复用16次。
+
+可以做到150 GB/s / 4B/FLOP * 6 = 600 GFLOP/s
+
+32 * 32 tiles ： 对于每一个从global memory读取的数据，复用32次。
+
+可以做到150 / 4 * 32 = 1200 GFLOPS > 1000 GFLOPS
+
+内存带宽不再是限制。
+
+
+
+##### handle boundary
+
+如果data并不是TILE_WIDTH的整数倍，需要解决boundary的问题
+
+
+
+* 两种boundary的问题
+1. thread 计算有效的p value，但是load global memory的时候会访问out of data. 这个时候应该假设load上来的数据都为0
+
+<img src="Note.assets/Screen Shot 2021-11-07 at 5.48.07 PM.png" alt="Screen Shot 2021-11-07 at 5.48.07 PM" style="zoom:40%;" />
+
+<img src="Note.assets/Screen Shot 2021-11-07 at 5.48.52 PM.png" alt="Screen Shot 2021-11-07 at 5.48.52 PM" style="zoom:40%;" />
+
+2. thread 没有计算有效的p value，而且load global memory的时候会访问out of data.这个时候应该假设load上来的数据都为0，并且不写入无效的output p中
+
+<img src="Note.assets/Screen Shot 2021-11-07 at 5.52.30 PM.png" alt="Screen Shot 2021-11-07 at 5.52.30 PM" style="zoom:40%;" />
+
+<img src="Note.assets/Screen Shot 2021-11-07 at 5.52.43 PM.png" alt="Screen Shot 2021-11-07 at 5.52.43 PM" style="zoom:40%;" />
+
+
+
+* 解决方法
+
+1. test during tile load
+
+如果target within input matrix, load
+
+如果target outside input matrix, put 0
+
+尽管多了一个branching，但是保证了计算部分的代码不会变得复杂。而且这个branching只会影响到一个warp内的thread，对于大多数thread都是在一个warp内不会导致两个branch都运行
+
+
+
+2. test during tile store
+
+如果value p outiside valid range, 则不写入。
+
+
+
+* 有关branch divergence
+
+只针对于block on boundary, 因为在非boundary中，尽管代码中有if else，但是依旧全部的thread走一个path
+
+```cpp
+__global__ void SquareMatrixKernel1( float* d_M, float* d_N, float* d_P, int width )
+{
+  __shared__ float subTileM[TILE_WIDTH][TILE_WIDTH];
+  __shared__ float subTilen[TILE_WIDTH][TILE_WIDTH];
+
+  int bx = blockIdx.x;
+  int by = blockIdx.y;
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+
+    // row 是P M N 对应的index。
+  // 所以可以被用于判断写入index，以及load index
+  int Row = by * TILE_WIDTH + ty;
+  int Col = bx * TILE_WIDTH + tx;
+  float Pvalue = 0;
+
+    // 一个thread block负责多个tile block
+  for ( int q = 0; q < (width-1) / TILD_WIDTH+1; ++q )
+  {
+    // load data to shared memory
+    if ( Row < )
+
+    subTileM[ty][tx] = M[Row * width + q * TILE_WIDTH + tx];
+    subTileN[ty][tx] = N[(q * TILE_WIDTH+ty)*Width+Col];
+
+    // barrier, wait for all threads load finish
+    __syncthreads();
+
+    for ( int k = 0; k < TILE_WIDTH; ++k )
+      Pvalue += subTileM[ty][k] * subTileN[k][tx];
+
+    // barrier, wait for all threads load finish
+    __syncthreads();
+  }
+
+  // write result
+  P[Row*Width+Col] = Pvalue;
+}
+```
+
+
+#### Example Conv
+> Reference
+> 1. PMPP Chapter 7
+> 2. UIUC 408 Lecture 7,8,9
+
+
+
+* Defination
+
+Convolution Masks / Filters (这里不用kernel来避免混淆)
+
+
+
+##### Simple 1D Conv
+
+* Math
+
+N 是 input array
+
+M 是mask
+
+P 是output array
+
+如果遇见boundary / ghost element，可以使用zero / padding的方法
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 7.48.24 PM.png" alt="Screen Shot 2022-05-31 at 7.48.24 PM" style="zoom:50%;" />
+
+
+
+* CUDA Code
+
+```c
+__global__ 
+void convolution_1D_basic_kernel(float *N, float *M, float *P, int Mask_Width, int Width)
+{ 
+	// every thread in charge of one output element
+	int i = blockIdx.x*blockDim.x + threadIdx.x;
+	float Pvalue = 0;
+	int N_start_point = i - (Mask_Width/2);
+	
+  // iterate through filter
+	for (int j = 0; j < Mask_Width; j++) 
+	{
+  	if (((N_start_point + j) >= 0) && ((N_start_point + j) < Width)) 
+  	{
+  		Pvalue += N[N_start_point + j]*M[j];
+ 	 	} 
+ 	} 
+} 
+```
+
+
+
+##### Simple 2D Conv
+
+* Math
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 7.50.55 PM.png" alt="Screen Shot 2022-05-31 at 7.50.55 PM" style="zoom:50%;" />
+
+
+
+##### Constant Memory for Filter 
+
+```cpp
+// global variable, outside any kernel/function
+__constant__ float Mc[MASK_WIDTH][MASK_WIDTH];
+
+// Initialize Mask
+float Mask[MASK_WIDTH][MASK_WIDTH];
+for(unsigned int i = 0; i < MASK_WIDTH * MASK_WIDTH; i++) {
+  Mask[i] = (rand() / (float)RAND_MAX);
+  if(rand() % 2) Mask[i] = - Mask[i];
+}
+
+// Copy from host to device constant memory
+cudaMemcpyToSymbol(Mc, Mask, MASK_WIDTH*MASK_WIDTH*sizeof(float));
+
+// launch kernel
+// constant memory is visible to all kernel functions throughout application lifetime
+ConvolutionKernel<<<dimGrid, dimBlock>>>(Nd, Pd);
+```
+
+
+
+##### 3 Strategy for Tile
+
+input数据存在复用，所以可以使用shared memory来减少对global memory的总访问次数
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.50.23 PM.png" alt="Screen Shot 2022-05-31 at 9.50.23 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.50.40 PM.png" alt="Screen Shot 2022-05-31 at 9.50.40 PM" style="zoom:50%;" />
+
+
+
+##### Strategy 1 for 1D
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.51.39 PM.png" alt="Screen Shot 2022-05-31 at 9.51.39 PM" style="zoom:50%;" />
+
+* 特点
+
+1. 总thread个数=总output elem个数
+2. 多个stage/step来load data
+3. halo value放在shared memory中
+4. parallel computation of each output element
+5. 包含strategy1，下面的三个strategy都没有充分的利用shared memory的大小。在UIUC 408的homework里面涉及到了充分利用shared memory的部分
+
+
+
+* adv
+
+1. coalesce global memory access
+2. no branch divergence during computation
+
+
+
+* disadv
+
+1. 使用更多的shared memory
+2. branch divergence during reading data。只有在array两边的warp才会发生divergence的问题
+
+
+
+* 算法 & 代码
+
+1. all thread load data from start of input
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.56.52 PM.png" alt="Screen Shot 2022-05-31 at 9.56.52 PM" style="zoom:50%;" />
+
+
+
+2. 2 * halo threads load remianing data
+
+只有最后的一个warp才会有divergence，前面array的warp都不会走if，也就没有warp divergence
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.57.05 PM.png" alt="Screen Shot 2022-05-31 at 9.57.05 PM" style="zoom:50%;" />
+
+
+
+3. no divergence during computation
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.58.09 PM.png" alt="Screen Shot 2022-05-31 at 9.58.09 PM" style="zoom:70%;" />
+
+
+
+* benifit analysis
+
+下面分析了internal tile的影响，对于含有boundary的tile影响是不一样的
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 10.51.18 PM.png" alt="Screen Shot 2022-05-31 at 10.51.18 PM" style="zoom:50%;" />
+
+reduction ratio for different tile size and tile width
+
+<img src="Note.assets/Screen Shot 2022-06-01 at 11.12.35 AM.png" alt="Screen Shot 2022-06-01 at 11.12.35 AM" style="zoom:50%;" />
+
+
+
+##### Strategy 2 for 2D
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.53.53 PM.png" alt="Screen Shot 2022-05-31 at 9.53.53 PM" style="zoom:50%;" />
+
+
+
+* 特点
+
+1. 总thread个数=总input elem个数
+2. halo value放在shared memory中
+3. some threads (not all) compute output
+4. parallel load memory from global memory to shared memory
+
+
+
+* adv
+
+1. coalesce global memory access
+2. no divergence during read
+
+
+
+* disadv
+
+1. branch divergence during computation
+2. 使用更多的shared memory
+
+
+
+* 算法 & 代码 （2D)
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 10.47.49 PM.png" alt="Screen Shot 2022-05-31 at 10.47.49 PM" style="zoom:50%;" />
+
+复杂的点在于input coordinate map to output coordinate
+
+
+
+* benifit analysis for 2D
+
+<img src="Note.assets/Screen Shot 2022-06-01 at 11.21.36 AM.png" alt="Screen Shot 2022-06-01 at 11.21.36 AM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-06-01 at 11.21.48 AM.png" alt="Screen Shot 2022-06-01 at 11.21.48 AM" style="zoom:50%;" />
+
+
+
+##### Strategy 3 for 1D
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.54.54 PM.png" alt="Screen Shot 2022-05-31 at 9.54.54 PM" style="zoom:50%;" />
+
+* 特点
+
+1. 总thread个数=总output elem
+2. parallel computation of each output element
+3. 只把internal element的部分放在shared memory上。halo value直接从gloabl memory访问 / 从 L2访问
+4. 对于recent gpu arch来说，这个方法是prefered的，因为有L2 cache，halo value会被nbr block访问的时候放到L2 cache上
+
+
+
+* Caching
+
+总Fermi开始，就提供L1 L2 cache。L1是per sm的，L2是across SM的。
+
+一个tile的ghost cell data对于nbr tile就是internal element。所以如果tile 0 访问ghost cell data from global memory，有很大的程度数据已经在L2 cache上了，因为tile 1做了blocking，数据被放到L2上。
+
+
+
+* adv
+
+1. 节省shared memory空间
+2. no branch divergence during load memory
+
+
+
+* disadv
+
+1. branch divergence during computation。发生在array左右两边的warp上
+
+
+
+* 算法/代码
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 9.58.41 PM.png" alt="Screen Shot 2022-05-31 at 9.58.41 PM" style="zoom:50%;" />
+
+
+
+
+
+##### Bandwidth Computation
+
+2022年的GPU需要很大的reuse才能克服bandwidth限制利用computation。
+
+<img src="Note.assets/Screen Shot 2022-06-01 at 11.23.41 AM.png" alt="Screen Shot 2022-06-01 at 11.23.41 AM" style="zoom:50%;" />
+
+
+
+需要很大的mask size才能更好的达到peak performence
+
+<img src="Note.assets/Screen Shot 2022-06-01 at 11.24.22 AM.png" alt="Screen Shot 2022-06-01 at 11.24.22 AM" style="zoom:50%;" /><img src="Note.assets/Screen Shot 2022-06-01 at 11.24.34 AM.png" alt="Screen Shot 2022-06-01 at 11.24.34 AM" style="zoom:50%;" />
+
+
+
+### Joint Register and Shared Memory Tiling
+
+> Reference
+>
+> UIUC ECE 508 Lecture 4
+>
+> Benchmarking GPUs to Tune Dense Linear Algebra
+
+
+
+* register 特点
+
+1. low latency 
+2. high throughput : per thread per clock cycle可以进行多个register访问与计算
+3. load data是serial的
+4. private to each thread
+5. 进行register tiling需要thread coarsening
+
+
+
+* shared memory 特点
+
+1. comparable latency
+2. lower throughput compared with register 
+3. can be loaded cooperatively by multiple thread
+
+
+
+* 为什么joint
+
+1. hardware path是不同的，可以combine tiling for register and shared memory 来增加throughput
+
+
+
+#### Source of reuse
+
+在做shared memory tiling的时候，reuse来自于shared memory的数据被多个thread访问，而不是来自于一个thread内部访问一个value多次。
+
+Tile size是T * T的话，每一个thread load一个M，一个N到shared memory，sync（确保数据都在shared memory中），然后遍历一小行M和一小列N来计算一个P，sync（确保shared memory被使用完），然后处理下一个tile
+
+对于每一个M的值，被T（结果P中tile的num col）个thread使用。
+
+对于每一个N的值，被T（结果P中tile的num row）个thread使用。
+
+<img src="Note.assets/Screen Shot 2022-06-06 at 6.00.42 PM.png" alt="Screen Shot 2022-06-06 at 6.00.42 PM" style="zoom:50%;" />
+
+从上面的分析中知道S的大小是independent of reuse factor, 所以S并不一定要等于T。
+
+同时因为计算P的会有两个sync（load to shared memory, wait for all comp on shared memory finish)， 所以S的大小也不能太小，否则sync会占用主要的时间
+
+同时tile size不一定是square的。
+
+every M value reused U time
+
+every N value reused T time
+
+<img src="Note.assets/Screen Shot 2022-06-06 at 6.16.45 PM.png" alt="Screen Shot 2022-06-06 at 6.16.45 PM" style="zoom:50%;" />
+
+
+
+#### Example GEMM
+> Volkov and Demmel SC 08
+
+一个dim进行register tiling。一个dim进行shared memory tiling
+
+<img src="Note.assets/Screen Shot 2022-06-06 at 6.32.38 PM.png" alt="Screen Shot 2022-06-06 at 6.32.38 PM" style="zoom:70%;" />
+
+
+
+1. 对tile of N (S * U)，使用shared memory tiling。thread cooperatively load S*U tile into shared memory
+
+   1. 对于每一个thread，使用S elem of M in reg 以及 S*U shared mem，计算U elem of P
+   2. 每一个elem of N被复用T time，因为已经选择了U=16（相对小的val），所以希望T可以大。选择T=64，与之前的32*32的T\*T一致
+   3. load of N tile可以被coalsed。可以使用corner-turning ，因为U是16 half warp
+
+2. 对于tile of M (S*T), 使用register tiling。每个thread load S element of M into register
+
+   1. 在shared memory tiling的情况下，S\*T elements是储存在shared memory，可以被多个thread访问的。现在S\*T element是private to each thread (S element for each thread, total T threads)。原来每个thread负责load一个M的elem，现在每个thread负责load 一行M的elem到register
+
+   2. 同时每个thread也需要保存U个element of P来做privitization
+
+      1. GPU普遍有10s reg per thread, 选择U=16
+
+   3. 对于M的访问是不coalsed的，无法进行corner-truning。多个thread同一个时间点访问的内存是不连续的。需要对M进行transpose、。
+
+      <img src="Note.assets/Screen Shot 2022-06-06 at 6.41.33 PM.png" alt="Screen Shot 2022-06-06 at 6.41.33 PM" style="zoom:50%;" />
+
+3. sync 来确保tile of N都在shared memory上
+4. 每个thread计算出U个P结果，T个thread计算出T*U个P结果。
+   1. 不希望U*S (每个thread的工作量)小，否则每两个sync之间的工作就比较少，划不来
+   2. 不希望S过于大，否则造成register pressure。而且S的load是到register的，是serialize的，也不希望大。
+   3. 因为tile N需要load S * U(16)个数据，一共有T(64)个thread，希望每个thread都有load elem的工作，所以选择S=T/U=4。
+5. sync来确保计算都完成，shared memory可以复用
+6. 进行下一个tile of M，tile of N, 对同一个T * U的tile of P的计算
+
+
+### Grid-stride loop / thread granularity / thread coarsening 
+
+> Ref
+>
+> 1. Berkeley CS 267 Lecture 7
+> 2. PMPP Chapter 5
+> 3. UIUC 508 Lecture 3
+
+
+
+* 是什么
+
+1. 原来需要多个thread完成的工作，现在使用一个thread完成，从而减少redundant work （parallel经常会有redundant computation在不同的thread上）
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 7.58.14 PM.png" alt="Screen Shot 2022-06-05 at 7.58.14 PM" style="zoom:50%;" />
+
+
+
+* 优点
+
+1. Eliminating redundant work can ease the pressure on the instruction processing bandwidth and improve the overall execution speed of the kernel. 对重复工作结果进行复用，从而减少instruction processing stream的贷款限制
+   1. 可以理解为一些会重复的computation，现在shared through register。本来register 是local to each thread, 无法shared across thread的
+   2. 访问register的throughput很大，per thread per cycle可以访问多个register file
+   3. 访问register的latency很小，只有1 clock cycle
+
+2. amortize threads creation/destruction cost
+
+
+
+* 缺点
+
+1. 每个thread使用更多的register，可能导致一个sm内总的thread数量减少（因为register constrain）。导致insufficent amount of parallelism。
+   1. not enough block per sm to keep sm busy
+   2. not enough block to balance across sm (thread合并了以后，总的thread数量减小，总的block数量也就减少了，而且每个block的时间久了，容易导致imbalance)
+   3. not enough thread to hide latency。通过warp间swap来hide latency，但是当总thread减少，总warp减少
+
+2. larger computation tiles. 产生more padding and wasted computation，一般通过reduce number of thread per block 解决
+   1. 如果一个thread在coarsening以后干了k*k个thread的工作，把原来的block size分别变为width/k和height/k来避免more padding and waste computation
+
+
+
+
+（one output per thread的idle)
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 8.46.53 PM.png" alt="Screen Shot 2022-06-05 at 8.46.53 PM" style="zoom:50%;" />
+
+(two output per thread的idle，更多idle)
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 8.47.17 PM.png" alt="Screen Shot 2022-06-05 at 8.47.17 PM" style="zoom:50%;" />
+
+
+
+
+
+* 为什么使用
+
+increase efficency outweight reduce of parallelism就可以
+
+
+
+* 例子1
+
+```cpp
+int numSMs;
+cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, devId);
+add<<<32 * numSMs, blockSize>>>(N, x, y);
+
+// GPU function to add two vectors
+__global__
+void add(int n, float *x, float *y) {
+  int index = blockDim.x * blockIdx.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  // 这里通过for loop对thread进行复用
+  for (int i = index; i < n; i+=stride)
+    y[i] = x[i] + y[i];
+}
+```
+
+
+
+#### Example GEMM
+
+reuse tile from matrix M for multipel tile N
+
+原来每个thread block用一个tile M和一个tile N进行计算。
+
+现在每个thread block用一个tile M和多个tile N进行计算，复用shared memory里面的tile M，让一个thread block进行多次计算。
+
+`DenseLinearAlgebra-CommunicationLowerBound.md::GEMM-UIUC` 没有考虑这个部分。
+
+<img src="Note.assets/Screen Shot 2022-05-31 at 7.07.46 PM.png" alt="Screen Shot 2022-05-31 at 7.07.46 PM" style="zoom:50%;" />
+
+
+
+#### Example DCS
+
+原来：each thread compute one output (见common optimization techiniques - scatter to gather - dcs example )
+
+现在：each thread compute four output
+
+
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 9.39.43 PM.png" alt="Screen Shot 2022-06-05 at 9.39.43 PM" style="zoom:50%;" />
+
+
+
+优点
+
+1. reduce number of load of atoms array by factor of 4
+2. eliminate redundant computation like dxx, dysqpdzsq
+
+
+
+缺点：
+
+1. 使用更多register，现在需要储存4个dxi, 4个energvalxi.
+
+
+
+#### Example 7 point Stencil
+
+stencil难点: memory intense & little computation (one fma per load value)
+
+
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 9.43.18 PM.png" alt="Screen Shot 2022-06-05 at 9.43.18 PM" style="zoom:50%;" />
+
+
+
+* thread coarsening along Z-axis
+
+原来：每个thread计算一个output
+
+现在：每个thread计算pencil along Z dim
+
+效果：
+
+1. 减少grid index的计算。现在可以 x + 1, y + 1 而不是 thread.x block.x blockdim.x 每次重新计算x y
+2. 更少的thread block，更少的thread block scheduling overhead
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 9.50.27 PM.png" alt="Screen Shot 2022-06-05 at 9.50.27 PM" style="zoom:50%;" />
+
+
+
+* register tiling
+
+一个thread计算pencil along z axis，z-axis上的数据复用可以使用register tilning
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.02.38 PM.png" alt="Screen Shot 2022-06-05 at 10.02.38 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.03.03 PM.png" alt="Screen Shot 2022-06-05 at 10.03.03 PM" style="zoom:50%;" />
+
+
+
+效果：
+
+原来一个output需要访问7个input through global memory access
+
+现在一个output需要访问5个input through globlal memory access
+
+节省了25%的global memory bandwidth
+
+
+
+* shared memory tilning 
+
+对于每一个current，都会被xy dim上的4个nbr thread使用。可以使用shared memory来共享这个部分
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.36.28 PM.png" alt="Screen Shot 2022-06-05 at 10.36.28 PM" style="zoom:50%;" />
+
+对于每一个block来说，现在有4 slices of data 在 on-chip memory 上。这是有限的内存，会限制block 的大小
+
+1. prev, curr, next 的 register slices。每一个thread使用3个register，对于block负责x y dim来说，就是3 slides of memory
+2. shared memory of current
+
+
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.38.29 PM.png" alt="Screen Shot 2022-06-05 at 10.38.29 PM" style="zoom:50%;" />
+
+
+
+对于halo来说，使用与conv strategy3类似的方法，访问global memory。更新的gpu arch有更大的across block L2 cache，这些halo cell会被nbr block放到L2 cache里，所以导致的thread divergence不会太严重
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.39.40 PM.png" alt="Screen Shot 2022-06-05 at 10.39.40 PM" style="zoom:50%;" />
+
+
+
+效果：
+
+原来计算一个elem需要访问5个global memory
+
+现在计算一个eleme需要访问1个global memory与4个shared memory
+
+但是由于shared memory与register的限制，block dim不能很大，导致halo的部分影响了reduce ratio
+
+<img src="Note.assets/Screen Shot 2022-06-05 at 10.41.50 PM.png" alt="Screen Shot 2022-06-05 at 10.41.50 PM" style="zoom:50%;" />
+
+
 
 
 
