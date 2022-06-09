@@ -261,35 +261,6 @@ else
 ```
 
 
-
-##### 改变algo来减少divergence
-
-* 普通的reduction algorithm
-
-work efficent
-
-但是存在branch divergence
-
-<img src="Note.assets/Screen Shot 2022-05-31 at 5.21.15 PM.png" alt="Screen Shot 2022-05-31 at 5.21.15 PM" style="zoom:50%;" />
-
-
-
-
-
-* 更改的reduction algorithm
-
-work efficent
-
-在除最后5个iteration（warp内的32thread）以外，没有branch divergence。
-
-第一个iteration过后，绿色的部分的thread运行就结束了，不会和橙色的部分一起运行，也就避免了branch divergence
-
-<img src="Note.assets/Screen Shot 2022-05-31 at 5.22.50 PM.png" alt="Screen Shot 2022-05-31 at 5.22.50 PM" style="zoom:50%;" />
-
-
-
-
-
 #### Synchronization within block
 
 > Programming Massively Parallel Processors 3rd edition chapter 3
@@ -314,8 +285,37 @@ CUDA为了保证transparent scalability，所以不允许block之间的synchroni
 
 
 
+#### Warp shuffle
 
-#### Memory Bandwidth 限制
+是什么：使用shuffle指令，threads within single warp can access register of other threads within warp. warp内的thread可以访问其余thread的寄存器。
+
+
+
+为什么好
+
+1. 更大的编程flexible
+2. 原来thread之间进行数据交换需要使用shared memory，latency以及bandwidth都比register要小。现在在一个warp内部可以使用register，更小的latency以及更大的bandwidth
+
+
+
+```cpp
+// warp shuffle for reduction
+val += __shfl_down_sync(0xffffffff, val, 16);
+val += __shfl_down_sync(0xffffffff, val, 8);
+val += __shfl_down_sync(0xffffffff, val, 4);
+val += __shfl_down_sync(0xffffffff, val, 2);
+val += __shfl_down_sync(0xffffffff, val, 1);
+
+// thread 0 have reduction value
+```
+
+
+
+```cpp
+// Use XOR mode to perform butterfly reduction
+    for (int i=16; i>=1; i/=2)
+        value += __shfl_xor_sync(0xffffffff, value, i, 32);
+```
 
 
 
@@ -748,6 +748,16 @@ padded info叫做 `pitch`
 
 
 
+* load from global memory to shared memory 过程
+
+内存拷贝与CPU相似，需要经过register
+
+global memory -> cache L1/L2 -> per thread register -> shared memory
+
+不存在直接从global memory到shared memory的硬件
+
+
+
 
 #### Constant memory
 
@@ -852,6 +862,34 @@ Kepler use software for shared memory atomic
 atomic is rouphly the same
 
 the flexibility of atomic is changed. now have atomic within warp / block.
+
+
+
+#### Cache
+
+##### Control cache behavior
+
+> Reference
+>
+> 1. Cache behavior when loading global data to shared memory in Fermi [link](https://forums.developer.nvidia.com/t/cache-behavior-when-loading-global-data-to-shared-memory-in-fermi/29259)
+
+load from global memory to register will be cache at L1 at default. 
+
+If you use the inline PTX call “ld.global.cg”, the read will be cached in L2 but not L1. “ld.global.cs” will not cache the read in L1 or L2. Alternatively, you can use a simple NVCC flag to make either of these types of reads the default by using “-Xptxas -dlcm=cg” or “-Xptxas -dlcm=cs”, though of course that then applies to ALL reads in your program.
+
+
+
+#### Register
+
+##### Register size
+
+> Reference
+>
+> 1. Saving registers with smaller data types? [link](https://forums.developer.nvidia.com/t/saving-registers-with-smaller-data-types/7376)
+
+Registers 是 32 bit / 4 bytes 大小的 (same size as int / float)。如果数据类型是double的话，则使用2个register。
+
+可以通过pack small data into a register (e.g. 2 short) and use bitmask + shift 来读取。从而减少register usage per thread
 
 
 
@@ -1898,7 +1936,7 @@ GPU上由于thread的总数量很多，使用privitization需要注意
 
 
 
-* 例子
+#### Example Histogram
 
 histogram中有highly contentious output conflict，每个thread都有很多的写
 
@@ -1907,6 +1945,193 @@ histogram中有highly contentious output conflict，每个thread都有很多的�
 如果使用all thread wihtin block share private copy的话，使用atoimic就会是一个问题
 
 主要高速我们privitization的coarsening是取决于程序的，并不一定总是private to thread / private to block
+
+
+
+#### Example Reduction
+
+> Reference
+>
+> 1. UIUC 408 Lecture 17
+> 2. Optimizing parallel reduction in cuda by Mark Harris [link](https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf)
+> 4. Faster Parallel Reductions on Kepler NVIDIA Blog [link](https://developer.nvidia.com/blog/faster-parallel-reductions-kepler/)
+
+
+
+* 什么是reduction
+
+Reduce a set of input to a single value with binary operator
+
+sequential algorithm take O(n) step
+
+parallel algorithm take O(log n) step with tree
+
+但是使用parallel algorithm经常存在的问题是diminishing parallelisim。对于CUDA来说是不好的，因为CUDA的资源是以block为单位进行分配的。
+
+<img src="Note.assets/Screen Shot 2022-06-07 at 5.01.48 PM.png" alt="Screen Shot 2022-06-07 at 5.01.48 PM" style="zoom:40%;" />
+
+
+
+
+
+* work efficency
+
+parallel algorithm 是work efficent的
+
+<img src="Note.assets/Screen Shot 2022-06-07 at 5.02.29 PM.png" alt="Screen Shot 2022-06-07 at 5.02.29 PM" style="zoom:50%;" />
+
+
+
+##### Simple reduction algorithm
+
+* 特点
+
+每个thread load 1 value from global memory to shared memory (will go through register)
+
+使用tree based方法合并
+
+privitization：每个block内有一个output的拷贝，最后一起放到global上
+
+
+
+* 缺点
+
+存在branch divergence，没有工作的warp因为divergence的原因依旧activate
+
+
+
+<img src="Note.assets/Screen Shot 2022-06-09 at 2.38.36 PM.png" alt="Screen Shot 2022-06-09 at 2.38.36 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-06-09 at 2.38.48 PM.png" alt="Screen Shot 2022-06-09 at 2.38.48 PM" style="zoom:50%;" />
+
+
+
+##### Reduce branch divergence
+
+* 特点
+
+让activate thread是连续的，上面simple reduce里面activate thread是不连续的(e.g. step2中thread 0 4 8 12)，这样就避免了branch divergence。
+
+在除最后5个iteration（warp内的32thread）以外，没有branch divergence。
+
+需要注意的是， if ( index < blockDim.x ) 为false的warp依旧会被schedule运行，只不过运行完if判断为false以后就让其余的warp运行，所以这里依旧有schedule overhead。
+
+
+
+* 缺点
+
+对内存的访问会产生bank conflict，访问是gap of power of 2, 会导致访问的内存都在一个bank上面，无法充分利用aggregated memory bandwidth.
+
+<img src="Note.assets/Screen Shot 2022-06-09 at 2.41.54 PM.png" alt="Screen Shot 2022-06-09 at 2.41.54 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-06-09 at 2.41.43 PM.png" alt="Screen Shot 2022-06-09 at 2.41.43 PM" style="zoom:50%;" />
+
+
+
+##### Reduce memory bank conflict
+
+* 特点
+
+使用连续的shared memory内存，从而避免bank conflict
+
+
+
+<img src="Note.assets/Screen Shot 2022-06-09 at 2.43.56 PM.png" alt="Screen Shot 2022-06-09 at 2.43.56 PM" style="zoom:50%;" />
+
+<img src="Note.assets/Screen Shot 2022-06-09 at 2.44.13 PM.png" alt="Screen Shot 2022-06-09 at 2.44.13 PM" style="zoom:50%;" />
+
+
+
+##### On-the fly computation
+
+* 特点
+
+上面的kernel中有一半的thread会在load完数据以后就没有工作了，这是很浪费thread的，同时占用了很多shared memory。
+
+每个thread可以load多个element from global memory to register, compute a result, and then put to shared memory.
+
+相比起储存全部的数据到shared memory里，这个kernel可以使用更少的threads block来处理相同的数据/同样大小的thread block处理更多的数据。当threads block大小减小的时候，就减少了diminishing parallelisim的问题。
+
+<img src="Note.assets/Screen Shot 2022-06-09 at 2.46.33 PM.png" alt="Screen Shot 2022-06-09 at 2.46.33 PM" style="zoom:50%;" />
+
+
+
+##### Reduce instruction overhead
+
+* 特点
+
+程序是memory bound的，之所以没有达到memory bandwidth是因为有其余的instruction overhead（也有其余的原因，像是kernel launch overhead等），希望减少其余的instruction 大小，减小instruction pipeline pressure。
+
+因为CUDA有对于threads per block的限制，所以可以completely unroll避免for loop
+
+使用template实现。因为template会给出blocksize的大小，红色的if branch会在compile time决定。
+
+<img src="Note.assets/Screen Shot 2022-06-09 at 4.39.22 PM.png" alt="Screen Shot 2022-06-09 at 4.39.22 PM" style="zoom:50%;" />
+
+
+
+##### Avoid sync in last 5 iteration
+
+> Reference
+>
+> 1. Volatile - when to use ? [link](https://forums.developer.nvidia.com/t/volatile-when-to-use-regarding-registers/21993/3)
+
+
+
+对于最后5个iteration(within warp0)不需要sync，因为warp内的thread是concurrent executed的，所以内部一定是sync的。
+
+
+
+* 使用shared memory
+
+这里对shared memory的使用没有用memory fence或者sync，所以需要使用volatile来避免compiler cache shared memory data on register
+
+volitile tells the compiler it is not to optimize variables (especially shared memory) by placing them in registers because another thread may update the variable. (The update would be ignored if the register was used instead).
+
+volatile should be used when the data can be changed outside the current thread without memory fences (for writes) or synchronization (for reads and writes). Otherwise the compiler is free to optimize the reads/writes to the variable by caching the data in a local register.
+
+<img src="Note.assets/Screen Shot 2022-06-09 at 4.40.12 PM.png" alt="Screen Shot 2022-06-09 at 4.40.12 PM" style="zoom:50%;" />
+
+
+
+* 使用warp shuffle
+
+```cpp
+  // Use XOR mode to perform butterfly reduction
+    for (int i=16; i>=1; i/=2)
+        value += __shfl_xor_sync(0xffffffff, value, i, 32);
+```
+
+
+
+##### Algorithm Cascading
+
+> Reference
+>
+> 1. Stackoverflow CUDA algorithm cascading [link](https://stackoverflow.com/questions/23232782/cuda-algorithm-cascading)
+
+是什么：结合sequential与parallel reduction。(sequential)每个thread首先从global memory读取多个值，sum up in register, 然后放到shared memory。(parallel) threads within block 从shared memory读取数据，parallel reduction。
+
+
+
+为什么：保证了每个thread都有一些work来做(sequential 的部分每个threa都进行相加，相比起完全parallel的情况下只有部分thread相加)，减少shared  memory的使用
+
+
+
+<img src="Note.assets/Screen Shot 2022-06-09 at 4.59.10 PM.png" alt="Screen Shot 2022-06-09 at 4.59.10 PM" style="zoom:50%;" />
+
+
+
+##### Compute centric
+
+使用thread block以后，keep thread block active。
+
+如果有thread不再active计算的话，则使用他们load数据。
+
+没有看到有实现使用了这个方法，不是很确定这个方法怎么做
+
+<img src="Note.assets/Screen Shot 2022-06-07 at 8.16.48 PM.png" alt="Screen Shot 2022-06-07 at 8.16.48 PM" style="zoom:50%;" />
+
 
 
 
