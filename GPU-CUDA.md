@@ -180,6 +180,8 @@ warp within a block can be execute in any order w.r.t each other
 
 其余的resident warp nolonger waiting for resources会被运行。如果多个resident warp都可以运行，则会采用latency hiding的priority mechanism来选择先运行谁。
 
+
+
 **zero-overhead scheduling** : selection of ready warps for execution avoid introduycing idle or waisting time into execution timeline. 
 
 如果有sufficent resident warp，则hardware will likely find warp to execute at any point in time.
@@ -261,6 +263,7 @@ else
 ```
 
 
+
 #### Synchronization within block
 
 > Programming Massively Parallel Processors 3rd edition chapter 3
@@ -285,13 +288,24 @@ CUDA为了保证transparent scalability，所以不允许block之间的synchroni
 
 
 
-#### Warp shuffle
+#### Warp level primative
 
-是什么：使用shuffle指令，threads within single warp can access register of other threads within warp. warp内的thread可以访问其余thread的寄存器。
+> reference
+>
+> 1. NVIDIA TECH BLOG Using CUDA Warp-Level Primitives [link](https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/)
+> 2. Stackoverflow activatemask vs ballot_sync [link](https://stackoverflow.com/questions/54055195/activemask-vs-ballot-sync)
 
 
 
-为什么好
+* 是什么：
+
+使用shuffle指令，threads within single warp can access register of other threads within warp. warp内的thread可以访问其余thread的寄存器。
+
+warp内的thread叫做lane。lane number from 0 to 31
+
+
+
+* 为什么好
 
 1. 更大的编程flexible
 2. 原来thread之间进行数据交换需要使用shared memory，latency以及bandwidth都比register要小。现在在一个warp内部可以使用register，更小的latency以及更大的bandwidth
@@ -306,7 +320,9 @@ val += __shfl_down_sync(0xffffffff, val, 4);
 val += __shfl_down_sync(0xffffffff, val, 2);
 val += __shfl_down_sync(0xffffffff, val, 1);
 
-// thread 0 have reduction value
+#define FULL_MASK 0xffffffff
+for (int offset = 16; offset > 0; offset /= 2)
+    val += __shfl_down_sync(FULL_MASK, val, offset);
 ```
 
 
@@ -316,6 +332,118 @@ val += __shfl_down_sync(0xffffffff, val, 1);
     for (int i=16; i>=1; i/=2)
         value += __shfl_xor_sync(0xffffffff, value, i, 32);
 ```
+
+
+
+* primatives
+
+1.  Synchronized data exchange: exchange data between threads in warp.
+   1. 这些sync语句要求thread首先被sync（也就是不需要再单独使用syncwarp()语句了），所以在调用这些语句的时候，数据thread会被sync （好像是cc 9+以后warp内的thread不保证一起执行）
+   2. The new primitives perform intra-warp thread-level synchronization if the threads specified by the mask are not already synchronized during execution.
+   3. Mask 的作用：mask to mean the set of threads in the warp that should participate in the collective operation.
+   4. 老版本的warp primative 不enforce synchronization。使用老版本的代码叫做implicit warp-synchronous programming，是一个危险的行为。
+   5. 从volta版本开始的program model开始，warp within thread schedule independently，而不是lock step
+
+```cpp
+__all_sync, __any_sync, __uni_sync, __ballot_sync
+__shfl_sync, __shfl_up_sync, __shfl_down_sync, __shfl_xor_sync
+__match_any_sync, __match_all_sync
+
+// Each thread that calls __shfl_sync() or __shfl_down_sync() receives data from a thread in the same warp
+```
+
+
+
+`unsigned __ballot_sync(unsigned mask, int predicate);` 会首先synchronize，不同的thread之间交换一个predicate （true/false)。用于create mask for other warp operation
+
+```cpp
+// 使用ballot_sync决定warp内只有部分thread参与计算，从而允许reduction计算的时候不是32的倍数
+//  __ballot_sync() is used to compute the membership mask for the __shfl_down_sync() operation. __ballot_sync() itself uses FULL_MASK (0xffffffff for 32 threads) because we assume all threads will execute it.
+unsigned mask = __ballot_sync(FULL_MASK, threadIdx.x < NUM_ELEMENTS);
+if (threadIdx.x < NUM_ELEMENTS) { 
+    val = input[threadIdx.x]; 
+    for (int offset = 16; offset > 0; offset /= 2)
+        val += __shfl_down_sync(mask, val, offset);
+}
+```
+
+
+
+2. Active mask query: returns a 32-bit mask indicating which threads in a warp are active with the current executing thread.
+   1. 并没有强制caller thread 会进行synchronize。The CUDA execution model does not guarantee that all threads taking the branch together will execute the __activemask() together. Implicit lock step execution is not guaranteed. 也就是一步一步的lock step是不保证的
+   2. activamask只是用来知道哪些thread碰巧convergent了，并不保证activemask调用后也会lock step。activemask相当于detect，但并不是set。
+   3. Don’t just use __activemask() as the mask value. __activemask() tells you what threads happen to be convergent when the function is called, which can be different from what you want to be in the collective operation.
+
+```cpp
+__activemask
+```
+
+
+
+下面这个例子就是一个错误的使用activemask的例子，因为并不保证activemask是被多个thread同clock执行的
+
+```cpp
+if (threadIdx.x < NUM_ELEMENTS) { 
+    unsigned mask = __activemask(); 
+    val = input[threadIdx.x]; 
+    for (int offset = 16; offset > 0; offset /= 2)
+        val += __shfl_down_sync(mask, val, offset);
+}
+```
+
+
+
+3. Thread synchronization: synchronize threads in a warp and provide a memory fence.
+   1. 之所以需要使用syncwarp是因为cuda9开始，warp内的thread并不保证在一个clock内同时运行相同的instruction。
+   2. memory fense的道理是和syncthread与shared memory一起使用相同的。因为warp内的thread并不能保证lock step，所以在写入/读取shared memory的时候，需要使用syncwarp来确保memory fense
+
+```cpp
+__syncwarp
+```
+
+
+
+```cpp
+// 一个错误的例子
+// read write to shared memory 依旧可能导致race condition, 因为 += 代表read comp write 
+shmem[tid] += shmem[tid+16]; __syncwarp();
+shmem[tid] += shmem[tid+8];  __syncwarp();
+shmem[tid] += shmem[tid+4];  __syncwarp();
+shmem[tid] += shmem[tid+2];  __syncwarp();
+shmem[tid] += shmem[tid+1];  __syncwarp();
+
+// 正确的例子
+// CUDA compiler 会在针对不同版本的arch选择删除_syncwarp。 
+// 如果在cuda9之前的硬件上，threads in warp run in lock step, 则会删除这些syncwarp。
+unsigned tid = threadIdx.x;
+int v = 0;
+v += shmem[tid+16]; __syncwarp();
+shmem[tid] = v;     __syncwarp();
+v += shmem[tid+8];  __syncwarp();
+shmem[tid] = v;     __syncwarp();
+v += shmem[tid+4];  __syncwarp();
+shmem[tid] = v;     __syncwarp();
+v += shmem[tid+2];  __syncwarp();
+shmem[tid] = v;     __syncwarp();
+v += shmem[tid+1];  __syncwarp();
+shmem[tid] = v;
+```
+
+
+
+注意：syncwarp + 老版本的warp primative +  syncwarp 不等于新版本的 warp primative 。因为CUDA program model不保证thread stay convergent after leaving syncwarp
+
+
+
+* 老版本效果
+
+可以使用下面的command编译得到老版本的lock step效果
+
+```cpp
+ -arch=compute_60 -code=sm_70
+```
+
+
 
 
 
@@ -445,6 +573,54 @@ each block 使用 2 * 32 * 32 * 4 bytes (float) = 8kb bytes share memory
 同样的memory parallelsim exposed. 
 
 尽管32的复用的内存更大，memory paralle与16一样。可能会存在一些block schedule的问题，因为更少的总block个数。
+
+
+
+#### Cooperative Groups
+
+> Reference
+>
+> 1. NVDIA TECH BLOG Cooperative Groups: Flexible CUDA Thread Programming [link](https://developer.nvidia.com/blog/cooperative-groups/)
+
+* 是什么
+
+原来的sync是within block的，从CUDA9开始，现在支持自定义thread group，可以是smaller than block，也可以是across block，甚至across gpu。group内的thread可以进行synchonize
+
+<img src="Note.assets/synchronize_at_any_scale.png" alt="Figure 3. Cooperative Groups enables synchronization of groups of threads smaller than a thread block as well as groups that span an entire kernel launch running on one or multiple GPUs." style="zoom:50%;" />
+
+
+
+* question
+
+不确定这样的group synchronize从效率上来讲是好还是坏
+
+
+
+#### Scheduling and Concurrency
+
+> Reference
+>
+> 1. CMU 15.418 Spring 2016 lecture 5 slides 56 discussion [link](http://15418.courses.cs.cmu.edu/spring2016/lecture/gpuarch/slide_056)
+
+![slide_056](Note.assets/slide_056.jpg)
+
+
+
+**注意：下面的讨论都是围绕着slides中特定的硬件版本**
+
+Each clock, the GTX 980 SMM core:
+
+1. Selects up to four unique, runnable warps to run instructions from. These four warps can come from any thread block currently active on the core. This is an instance of simultaneous multi-threading (lecture 2). 每个clock，会从64个active warp中选择4个active wap。（active warp的定义是sm maintain warp execution context)。这里的平行是**simutaneous multi-threading**。之所以能选择4个warp是因为有4个warp scheduler (以及对应的pc)
+2. From each of these four warps, the clock attempts to find up to two instructions to execute. This is instruction level parallelism (lecture 1) within the warp. If independent instructions are not present in the warp's instruction stream, then only one instruction from the warp can be executed. There is no ILP in the instruction stream! 每个clock，每个warp (out of 4)，会选择两个独立的instruction来运行。如果找不到两个独立的instruction来运行的话，则运行一个instruction。这里的平行是**ILP**
+3. Out of the eight total instructions the core tries to find (across the four threads), up to four of those can be arithmetic instructions. These instructions will be executed on the four different groups of 32-wide SIMD ALUs that the core has. To be absolutely clear, all 4x32 = 128 ALUs in the SMM execute these four 32-wide instructions at the same time -- true parallel execution. (As pointed out in the footnote, and discussed a bit in the discussion on the previous slide, other non-basic-arithmetic instructions, like loads and stores, or special arithmetic ops like sin/cos/pow can also be executed simultaneously with these four basic-SIMD-arithmetic ops, but I didn't draw the units that perform these operations on this diagram.) 从最多8个可能的instruction里，最多4个是数学计算，可以同时被4个32长度的SIMTD ALU处理（same clock)，也可以同时处理load store
+
+
+
+Note that in the diagram above, the core has the ability to maintain execution contexts for up to 64 warps at once (if you like to think in terms of CUDA threads rather than warps, this is 64x32=2048 CUDA threads). These warps are executed concurrently by the SMM core, but in any one clock the core will only execute instructions from at most four of them. This is the idea of interleaved multi-threading as illustrated here. SM可以维持64个active warp通过维持他们的execution context。这64个active warp可以来自多个block。SM对block的schedule是使用或者不使用整个block。SM通过interleave这64个warp来hide latency。
+
+
+
+Do not confuse the requirement that all CUDA threads (or their corresponding warps) in a thread block must be live--a.k.a. occupying an execution context on a core-- during the lifetime of the thread block (a requirement that we discuss again on slide 73) with the fact that the core can indeed run instructions from multiple threads simultaneously on its parallel execution units. It seems to me that interleaved multi-threading and simultaneous execution of instructions from multiple threads are being confused in some of the comments posted above. 一个block内thread只要运行的时候就是都active的，因为SM是以block为单位分配资源。
 
 
 
@@ -829,6 +1005,8 @@ cudaMemcpyToSymbol(Mc, Mask,, MASK_WIDTH*MASK_WIDTH*sizeof(float));
 
 > UIUC 508 Lecture 2
 
+##### Evolving
+
 GPU atomic随着GPU Arch也在改进
 
 atomic on shared memory >> atomic on global memory 
@@ -862,6 +1040,18 @@ Kepler use software for shared memory atomic
 atomic is rouphly the same
 
 the flexibility of atomic is changed. now have atomic within warp / block.
+
+
+
+##### Warp-aggregated atomics
+
+> reference
+>
+> 1. CUDA TECH BLOG CUDA Pro Tip: Optimized Filtering with Warp-Aggregated Atomics [link](https://developer.nvidia.com/blog/cuda-pro-tip-optimized-filtering-warp-aggregated-atomics/)
+
+
+
+
 
 
 
@@ -1708,6 +1898,7 @@ every N value reused T time
 6. 进行下一个tile of M，tile of N, 对同一个T * U的tile of P的计算
 
 
+
 ### Grid-stride loop / thread granularity / thread coarsening 
 
 > Ref
@@ -1715,12 +1906,17 @@ every N value reused T time
 > 1. Berkeley CS 267 Lecture 7
 > 2. PMPP Chapter 5
 > 3. UIUC 508 Lecture 3
+> 4. NVIDIA Tech BLOG CUDA Pro Tip: Write Flexible Kernels with Grid-Stride Loops  [link](https://developer.nvidia.com/blog/cuda-pro-tip-write-flexible-kernels-grid-stride-loops/)
 
 
 
 * 是什么
 
 1. 原来需要多个thread完成的工作，现在使用一个thread完成，从而减少redundant work （parallel经常会有redundant computation在不同的thread上）
+2. 两种类型：一个是让一个thread在1个iteration中完成原来多个thread的工作。另一个是让一个thread block在完成当前thread block的工作后（与原来的工作相同），再处理下一个thread block。
+3. thread 0会处理 elem 0, elem 0 + num thread in grid, elem 0 * 2 * num thread in grid. 每一次的step是grid，也是为什么叫做grid stride loop的原因
+   1. 对比起来，每个thread处理一个元素的loop叫做`monolithic kernel`
+
 
 <img src="Note.assets/Screen Shot 2022-06-05 at 7.58.14 PM.png" alt="Screen Shot 2022-06-05 at 7.58.14 PM" style="zoom:50%;" />
 
@@ -1733,13 +1929,32 @@ every N value reused T time
    2. 访问register的throughput很大，per thread per cycle可以访问多个register file
    3. 访问register的latency很小，只有1 clock cycle
 
-2. amortize threads creation/destruction cost
+2. scalability，可以支持program size > total num thread on hardware. 
+
+3. 可以tune code with num block = multiply of SM, 然后使用grid stride loop来支持不同大小的问题。
+
+   1. ```cpp
+      int numSMs;
+      cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, devId);
+      // Perform SAXPY on 1M elements
+      saxpy<<<32*numSMs, 256>>>(1 << 20, 2.0, x, y);
+      ```
+
+4. Thread reuse amortizes thread creation and destruction cost along with any other processing the kernel might do before or after the loop (such as thread-private or shared data initialization).
+
+5. 更容易debugging，可以把launch 1 thread 1 block的kernel来debug，不需要改变kernel内容
+
+   1. ```cpp
+      saxpy<<<1,1>>>(1<<20, 2.0, x, y);
+      ```
+
+6. readability as sequential code 。与sequential code一致都有for loop的存在，更好理解代码
 
 
 
 * 缺点
 
-1. 每个thread使用更多的register，可能导致一个sm内总的thread数量减少（因为register constrain）。导致insufficent amount of parallelism。
+1. （在情况1下）每个thread使用更多的register，可能导致一个sm内总的thread数量减少（因为register constrain）。导致insufficent amount of parallelism。
    1. not enough block per sm to keep sm busy
    2. not enough block to balance across sm (thread合并了以后，总的thread数量减小，总的block数量也就减少了，而且每个block的时间久了，容易导致imbalance)
    3. not enough thread to hide latency。通过warp间swap来hide latency，但是当总thread减少，总warp减少
