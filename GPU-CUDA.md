@@ -1306,6 +1306,93 @@ Registers 是 32 bit / 4 bytes 大小的 (same size as int / float)。如果数�
 
 
 
+
+
+#### Memory Fence
+
+> Reference
+>
+> 1. CUDA Toolkits document [link](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#memory-fence-functions)
+> 2. stackoverflow [link](https://stackoverflow.com/questions/5232689/cuda-threadfence)
+
+
+
+* 是什么
+
+CUDA使用weakly-ordered memory model。一个thread写入shared memory, global memory, paged lock memory的顺序与另一个thread观察到的顺序是不一样的。如果两个thread一个read，一个write，没有sync的话，则行为是undefined的
+
+通过使用memory fence，保证 (1) all write before fence对于程序(不同的scope)来说发生在all write after fence之前. (2) all read before fence对于程序(不同的scope)来说发生在all read after fence之前
+
+
+
+* 三个方程
+
+```cpp
+// fence for all thread within one block
+void __threadfence_block();
+
+// fence for all thread within one GPU device
+void __threadfence();
+
+// fence for all thread across all GPU device
+void __threadfence_system();
+
+```
+
+
+
+* 例子 1
+
+下面这个例子中，不可能得到A=1,B=20。因为X=10一定发生在Y=20之前，如果observe了Y=20的话，则X=10一定运行完了
+
+```cpp
+__device__ int X = 1, Y = 2;
+
+__device__ void writeXY()
+{
+    X = 10;
+    __threadfence();
+    Y = 20;
+}
+
+__device__ void readXY()
+{
+    int B = Y;
+    __threadfence();
+    int A = X;
+}
+```
+
+
+
+* 例子 2
+
+Imagine, that one block produces some data, and then uses atomic operation to mark a flag that the data is there. But it is possible that the other block, after seeing the flag, still reads incorrect or incomplete data.
+
+一个block写入global memory数据以及用atomic写入flag，另一个block通过flag判断是否可以读取global memory的数据。
+
+ If no fence is placed between storing the partial sum and incrementing the counter, the counter might increment before the partial sum is stored 
+
+如果没有memory fence的话，可能flag会首先被atomic设置了，然后才设置global memory的数据。这样另一个block在读取到flag以后就开始读取global memmory的值可能就是不对的。
+
+通过使用memory fence，确保在fence后面读取memory的数据确实是fence之前写入的数据
+
+
+
+#### Volatile
+
+> Reference
+>
+> 1. CUDA Toolkits Document I.4.3.3 [link](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#volatile-qualifier)
+
+* 是什么
+
+compiler可以对global memory/shared memory的read write进行优化，例如cache在L1 cache或者register上，只要符合memory fence的要求就可以进行优化。
+
+声明volatile以后，compiler会不optimize，全部的写入会写入到gloabl memory/shared memory上。这样另一个thread可以读取对应的内存并且得到正确的数值。
+
+
+
 ## Common Optimization Techniques
 
 > Reference
@@ -2376,6 +2463,10 @@ GPU上由于thread的总数量很多，使用privitization需要注意
 
 #### Example Histogram
 
+> Reference
+>
+> 1. UIUC 408 Lecture 18
+
 histogram中有highly contentious output conflict，每个thread都有很多的写
 
 通过让8 thread shared private histogram on shared memory （而不是all thread within block) 来保证atomic bandwidth。
@@ -2569,6 +2660,374 @@ volatile should be used when the data can be changed outside the current thread 
 没有看到有实现使用了这个方法，不是很确定这个方法怎么做
 
 <img src="Note.assets/Screen Shot 2022-06-07 at 8.16.48 PM.png" alt="Screen Shot 2022-06-07 at 8.16.48 PM" style="zoom:50%;" />
+
+
+
+### Algorithm Cascading
+
+> Reference
+>
+> 1. UIUC 408 Lecture 15 on reduction, algorithm cascading
+> 2. PMPP Chapter 8.5 three phase
+
+
+
+* 是什么
+
+混合sequential 与 parallel 算法，从而让每个thread有足够的工作(sequential)来避免parallel的overhead，而且允许thread之间通过parallle来进行计算
+
+
+
+#### Example prefix-sum / parallel scan
+
+> Reference
+>
+> 1. UIUC 408 Lecture 16, 17
+> 2. PMPP Chapter 8
+>
+> 
+>
+> Note: 之所以把scan放在algorithm cascading里面，是因为最重要的能够实现work efficent的three phase算法用到了Algorithm cascading的想法
+
+
+
+* Inclusive scan defination
+
+<img src="Note.assets/Screen Shot 2022-06-16 at 10.46.18 AM.png" alt="Screen Shot 2022-06-16 at 10.46.18 AM" style="zoom:50%;" />
+
+
+
+* Sequential C 
+
+```cpp
+y[0] = x[0];
+for (i = 1; i < Max_i; i++)
+    y[i] = y[i-1] + x[i];
+```
+
+
+
+##### Kogge-Stone
+
+<img src="Note.assets/Screen Shot 2022-06-17 at 10.26.50 PM.png" alt="Screen Shot 2022-06-17 at 10.26.50 PM" style="zoom:50%;" />
+
+
+
+```cpp
+__global__ void Kogge-Stone_scan_kernel(float *X, float *Y, int InputSize) 
+{
+    // num thread = SECTION_SIZE
+    __shared__ float XY[SECTION_SIZE];
+
+    int i = blockIdx.x*blockDim.x + threadIdx.x;
+
+    // each thread load one element from global memory to shared memory
+    if (i < InputSize)
+        XY[threadIdx.x] = X[i];
+
+    // the code below performs iterative scan on XY
+  	// log(n) step in total from stride 1 to stride SECTION_SIZE in step 2
+    for (unsigned int stride = 1; stride < blockDim.x; stride *= 2) 
+    {
+      	// ensure previous step all thread have finish write to shared memory 
+        // and the shared memory contain new information
+        __syncthreads(); 
+
+      	int tmp;
+        if (threadIdx.x >= stride)
+            tmp = XY[threadIdx.x] + XY[threadIdx.x-stride];
+     
+        // ensure all thread have load required information from shared memory, 
+      	// no data from previous step is needed (from shared memory), safe to overwrite.
+        __syncthreads(); 
+        if (threadIdx.x >= stride)
+            XY[threadIdx.x] = tmp;
+    }
+
+    // write shared memory back to global memory
+    Y[i] = XY[threadIdx.x];
+}
+```
+
+
+
+
+
+* 特点
+
+1. number of thread = number of elements
+2. 处理within block scan
+3. 随着iteration，第一个warp内会产生branch divergence，但是对于较大的block不是问题
+4. 通过stride的方式来shared computation result
+5. 需要两个syncthread在使用shared memory的时候
+6. 可以使用warp内部的shuffle instruction来实现。
+
+
+
+* speed and work efficency analysis
+
+step : O(log n)
+
+work : (n-1) + (n-2) + (n-4) + ... + (n-n/2) = N*log2N – (N–1) = O(n log n) work
+
+speed up : (N*log2N)/P  where p is number of execution unit
+
+
+
+当谈论speed up的时候，不是看step有多少，而是看speed up ratio。因为平行算法也只有有限的hardware resource (execution unit), 所以处理n个数据对于有限的execution unit需要花费多个step。
+
+在有充分的hardware resource的时候，speedup是有效果的。
+
+当硬件资源不充分的时候，就无法充分利用这个算法，同时更加energy consumption
+
+
+
+##### Double buffer Kogge-Stone
+
+<img src="Note.assets/Screen Shot 2022-06-17 at 10.36.10 PM.png" alt="Screen Shot 2022-06-17 at 10.36.10 PM" style="zoom:50%;" />
+
+
+
+* 特点
+
+1. 避免了第二个sync thread的使用。因为现在可以直接overwrite，不需要判断是否可以overwrite
+
+
+
+##### Brent-Kung
+
+<img src="Note.assets/Screen Shot 2022-06-17 at 10.43.02 PM.png" alt="Screen Shot 2022-06-17 at 10.43.02 PM" style="zoom:50%;" />
+
+```cpp
+__global__ void Brent_Kung_scan_kernel(float *X, float *Y, int InputSize) 
+{
+    __shared__ float XY[SECTION_SIZE];
+    int i = 2*blockIdx.x*blockDim.x + threadIdx.x;
+    
+    // each thread load two elem from global memory to shared memory
+    if (i < InputSize) XY[threadIdx.x] = X[i];
+    if (i+blockDim.x < InputSize) XY[threadIdx.x+blockDim.x] = X[i+blockDim.x];
+    
+    // parallel scan step method 1
+    for (unsigned int stride = 1; stride <= blockDim.x; stride *= 2) 
+    { 
+        // ensure all thread from previous step have finish
+        // so that shared memory contain valid data to be used
+        __synchthreads(); 
+        if ((threadIdx.x + 1)%(2*stride) == 0) 
+        {
+           XY[threadIdx.x] += XY[threadIdx.x - stride];
+        }
+    }
+
+    // parallel scan step method 2
+    for (unsigned int stride = 1; stride <= blockDim.x; stride *= 2) 
+    {
+        // ensure all thread from previous step have finish
+        // so that shared memory contain valid data to be used
+        __syncthreads();
+        int index = (threadIdx.x+1) * 2* stride -1;
+        if (index < SECTION_SIZE) 
+        {
+            XY[index] += XY[index - stride];
+        }
+    }
+
+    // post scan step
+    for (int stride = SECTION_SIZE/4; stride > 0; stride /= 2) 
+    {
+        __syncthreads();
+        int index = (threadIdx.x+1)*stride*2 - 1;
+        if(index + stride < SECTION_SIZE) 
+        {
+            XY[index + stride] += XY[index];
+        }
+    }
+
+    // thread write result from shared memory back to global memory
+    __syncthreads();
+    if (i < InputSize) Y[i] = XY[threadIdx.x];
+    if (i+blockDim.x < InputSize) Y[i+blockDim.x] = XY[threadIdx.x+blockDim.x];
+}
+```
+
+
+
+
+
+* 特点
+
+1. number of thread = number of element / 2
+2. 处理within block scan
+3. 使用reduction tree来实现work efficent （因为用了reduction tree，每个iteration的work减少了，从而work efficent了）
+4. 每个iteration，只用进行一次sync，因为每个thread的dst并不被其余的thread作为src，所以不需要考虑是否可以overwrite的问题
+
+
+
+* parallel scan step 两种方法
+
+method 2通过计算thread到index的映射关系（不直接使用thread id作为index），从而使用了decreasing number of contigious thread 来避免branch divergence
+
+branch divergence 除了within warp 存在，其余都不存在
+
+第一个iteration，thread 0-7负责idx 1,3,5,7,9,11,13,15
+
+第二个iteration，thread 0-3 负责idx 3,7,11,15
+
+
+
+* step and work analyaia
+
+step : 2 log n
+
+work : 2N-2-log2(N)
+
+算法本身是work efficent的
+
+但是由于cuda对资源的分配是以block为单位的，所以inactive thread虽然没有进行计算，但是依旧占用资源。导致占用的资源实际上接近 (N/2)*(2*log2(N)−1). 
+
+由于cuda资源分配的特点，最终的work efficency与kogge-stone算法相近。
+
+
+
+##### Three phase with algorithm cascaing
+
+<img src="Note.assets/Screen Shot 2022-06-17 at 11.10.32 PM.png" alt="Screen Shot 2022-06-17 at 11.10.32 PM" style="zoom:50%;" />
+
+
+
+* algorithm
+
+1. input section partition into number of threads subsection. 
+   1. num thread = 4, num input = 40, each subsection contain 10 element. (in the figure 8.7 above, subsection length is 4)
+2. Corner turning to memory coalesed load input section to shared memory
+3. (step 1) each thread perform scan within subsection serially 
+   1. thread perform scan on 10 subsection elment 
+4. (step 2) Kogge–Stone/Brent–Kung to scan with last element in each subsection array.
+5. (Step 3) each thread add previous subsection sum to current array.
+
+
+
+* 特点
+
+1. work efficent in CUDA
+2. 处理within block scan
+3. 能够处理的elem不受到max thread per block 的限制，只收到shared memory的限制。
+   1. kogge-stone最多处理max thread per block个element
+   2. brent-kung最多处理2 * max thread per block个element
+
+
+
+* work and step analysis
+
+Assume that we use the Kogge–Stone algorithm for phase 2. For an input list of N elements, if we use T threads, the amount of work done is N−1 for phase 1, T\*log2T for phase 2, and N−T for phase 3. If we use P execution units, the execution can be expected to take (N−1+T\*log2T+N−T)/P time units.
+
+
+
+##### Hierarchical scan
+
+<img src="Note.assets/Screen Shot 2022-06-17 at 11.18.29 PM.png" alt="Screen Shot 2022-06-17 at 11.18.29 PM" style="zoom:50%;" />
+
+
+
+* 特点
+
+1. 处理inter-block scan
+2. 允许任何大小的scan，不再局限于max thread per block / max shared memory per block
+
+
+
+* 算法
+
+1. kernel 1 : 计算scan block的scan，可以使用kogge-stone/brent-kung/three-phase的方法。
+
+   1. 需要多一个parameter S of dim SIZE/SECTION_SIZE，最后一个thread负责把partial sum写入到global memory array S里
+
+   2. 需要把shared memory的partial result写入到shared memory中
+
+      ```cpp
+      __syncthreads();
+      if (threadIdx.x == blockDim.x-1) {
+        S[blockIdx.x] = XY[SECTION_SIZE – 1];
+      }
+      ```
+
+2. kernel 2 : 可以使用kogge-stone/brent-kung/three-phase的方法，把S作为input，把S作为output。
+
+   1. 通过kernel1运行完成，termiante kernel，从而实现全部kernel 1的synch
+
+3. kernel 3：take S与Y（global memory array)作为input，把S对应value加到每一个Y的元素中。
+
+   1. 需要读取global memory Y，写入global memory Y
+
+   ```cpp
+   int i = blockIdx.x * blockDim.x + threadIdx.x;
+   Y[i] += S[blockIdx.x-1];
+   ```
+
+
+
+kernel 1，kernel 2可以使用三种algo的原因是因为一般scan block大小不会太大，由scan block最后sum组成的S也不会太大
+
+
+
+
+##### Stream based scan hierchical scan
+
+> reference
+>
+> 1. CUDA Toolkits document [link](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#memory-fence-functions)
+> 2. stackoverflow cuda threadfence [link](https://stackoverflow.com/questions/5232689/cuda-threadfence)
+
+```cpp
+// scan_value : volatile global memory
+// use volatile to ensure when other block read this memory, current block have write result to memory location instead of cache / register
+__shared__ float previous_sum;
+if (threadIdx.x == 0)
+{
+  // Wait for previous flag
+  while (atomicAdd(&flags[bid], 0) == 0){;}
+  // Read previous partial sum from global memory
+  previous_sum = scan_value[bid];
+  // Propagate partial sum
+  scan_value[bid + 1] = previous_sum + local_sum;
+  // Memory fence
+  // ensures that the partial sum is completely stored to memory (scan_value有最终结果) before the flag is set with atomicAdd()
+  __threadfence();
+  // Set flag
+  atomicAdd(&flags[bid + 1], 1);
+}
+// all other threads inside block wait for thread 1
+__syncthreads();
+```
+
+
+
+* 特点
+
+1. 避免了hierchical的两次global memory读写
+2. 使用adjacent block synchronization在block之间传递信息。
+   1. 对于每一个block，等待左边的block传递信息给他，然后再把信息传递给右边的block
+   2. 通过使用atomic的方式来实现
+   3. 在block之间传递消息的时候是serialize的
+3. scan_value 需要是 volatile的，从而避免compiler把数据放在register/reorder代码，从而实际上没有写入scan_value
+4. 对于scan_value与flag的访问尽管是在global memory上，但是在modern gpu时是在L2 cache上的访问。
+
+
+
+* 通过dynamic block indexing 避免deadlock
+
+为什么有deadlock：block scheduling不按顺序，如果block i在block i+1后面运行+block i+1占用了全部的resource，导致block i+1在运行结尾等待block i，但是block i由于没有resource无法被schedule，从而造成deadlock
+
+什么是dynamic block index：decouple usage of thread bloxk index from blockIdx.x
+
+```cpp
+__shared__ int sbid;
+if (threadIdx.x == 0)
+  sbid = atomicAdd(DCounter, 1);
+__syncthreads();
+const int bid = sbid;
+```
 
 
 
