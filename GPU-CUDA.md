@@ -1,5 +1,17 @@
 # GPU
 
+## Questions & TODO
+
+1. warp level atomic
+2. parent grid and child grid 嵌套
+3. 总结一下global memory如何声明
+4. read only cache for global memory 总结 [link to read](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#global-memory-3-0)
+5. write的时候发生了多少，是否经过L1 cache，粗细粒度是多少
+6. GPU bank的划分
+7. shared meomoey的访问模式
+
+
+
 ## Design Principle
 
 ### CPU VS GPU
@@ -139,11 +151,26 @@ maxwell take max 2048 threads per sm
 
 maxwell take max 1024 threads per block
 
-
+一般会选择num block = multipler of number of SM
 
 <img src="./Note.assets/Screen Shot 2022-05-29 at 5.33.49 PM.png" alt="Screen Shot 2022-05-29 at 5.33.49 PM" style="zoom:50%;" />
 
 如果device与host同时被使用，compiler会生成两个版本的代码。
+
+
+
+* 特点
+
+1. cuda kernel 启动都是 async的
+2. cudaMemcpy device to host 有 implicit barrier
+
+
+
+##### 与硬件的对应关系
+
+<img src="Note.assets/3_2.png" alt="3_2" style="zoom:50%;" />
+
+
 
 
 
@@ -180,6 +207,8 @@ warp within a block can be execute in any order w.r.t each other
 
 其余的resident warp nolonger waiting for resources会被运行。如果多个resident warp都可以运行，则会采用latency hiding的priority mechanism来选择先运行谁。
 
+<img src="Note.assets/3_4.png" alt="3_4" style="zoom:50%;" />
+
 
 
 **zero-overhead scheduling** : selection of ready warps for execution avoid introduycing idle or waisting time into execution timeline. 
@@ -191,6 +220,18 @@ warp within a block can be execute in any order w.r.t each other
 
 
 <img src="Note.assets/Screen Shot 2021-11-07 at 12.53.14 PM.png" alt="Screen Shot 2021-11-07 at 12.53.14 PM" style="zoom:40%;" />
+
+
+
+* threads的状态
+
+1. all thread inside block not scheduled on SM
+2. all thread inside block scheduled on SM
+   1. Warp that's SM is currently executing
+   2. Warp that ready to be executed by SM
+   3. Warp that not ready to be executed because of dependency (e.g. load memory not finish yet)
+
+
 
 
 
@@ -335,14 +376,63 @@ for (int offset = 16; offset > 0; offset /= 2)
 
 
 
-* primatives
+
+
+##### Independent thread scheduling
+
+> Reference
+>
+> NVIDIA TECH BLOG Inside Volta: The World’s Most Advanced Data Center GPU [link](https://developer.nvidia.com/blog/inside-volta/)
+
+* 总结
+
+从volta版本开始的program model开始，warp within thread schedule independently，而不是lock step
+
+ Volta GV100 is the first GPU to support independent thread scheduling, which enables finer-grain synchronization and cooperation between parallel threads in a program. 
+
+
+
+* Pascal SIMT Model
+
+Pascal and earlier NVIDIA GPUs execute groups of 32 threads—known as warps—in SIMT (Single Instruction, Multiple Thread) fashion. The Pascal SIMT execution model maximizes efficiency by reducing the quantity of resources required to track thread state (one program counter shared across threads in warp) and by aggressively reconverging (下图中的reconverge) threads to maximize parallelism. 
+
+<img src="Note.assets/image15.png" alt="Figure 11: Thread scheduling under the SIMT warp execution model of Pascal and earlier NVIDIA GPUs. Capital letters represent statements in the program pseudocode. Divergent branches within a warp are serialized so that all statements in one side of the branch are executed together to completion before any statements in the other side are executed. After the else statement, the threads of the warp will typically reconverge." style="zoom:48%;" />
+
+
+
+* Volta SIMT model
+
+maintaining execution state per thread, including the program counter and call stack 每一个thread都有自己的program counter
+
+threads can now diverge and reconverge at sub-warp granularity, and Volta will still group together threads which are executing the same code and run them in parallel.
+
+
+
+<img src="Note.assets/warp_pascal_volta.png" alt="Figure 11: Volta (bottom) independent thread scheduling architecture block diagram compared to Pascal and earlier architectures (top). Volta maintains per-thread scheduling resources such as program counter (PC) and call stack (S), while earlier architectures maintained these resources per warp." style="zoom:48%;" />
+
+
+
+execution is still SIMT: at any given clock cycle CUDA cores execute the same instruction for all active threads in a warp just as before, retaining the execution efficiency of previous architectures. 程序依旧是以SIMT来运行的，只不过现在不同branch的工作允许intreleave了。
+
+the scheduler supports independent execution of threads(through use of SIMT), it optimizes non-synchronizing code to maintain as much convergence as possible for maximum SIMT efficiency. scheduler允许每个thread独立运行，但是会尽量converge来增加SIMT利用率。
+
+需要注意的是下图中Z运行之前并没有进行reconverge(因为thread scheduled independently），这是因为compiler认为Z可能与X Y有某些data dependency。但是这也导致SIMT的efficency降低（本来可以一个cycle运行Z，但是现在需要两个cycle，每次跑一部分）。
+
+<img src="Note.assets/image5.png" alt="Figure 13: Volta independent thread scheduling enables interleaved execution of statements from divergent branches. This enables execution of fine-grain parallel algorithms where threads within a warp may synchronize and communicate." style="zoom:50%;" />
+
+可以使用cuda9的syncwarp来保证线程之间converge，从而实现更大的SIMT efficency。如果在Z之前就syncwarp，则会提高SIMT利用率。
+
+<img src="Note.assets/image16.png" alt="Figure 14: Programs can use explicit synchronization to reconverge threads in a warp." style="zoom:48%;" />
+
+
+
+##### primatives
 
 1.  Synchronized data exchange: exchange data between threads in warp.
    1. 这些sync语句要求thread首先被sync（也就是不需要再单独使用syncwarp()语句了），所以在调用这些语句的时候，数据thread会被sync （好像是cc 9+以后warp内的thread不保证一起执行）
    2. The new primitives perform intra-warp thread-level synchronization if the threads specified by the mask are not already synchronized during execution.
    3. Mask 的作用：mask to mean the set of threads in the warp that should participate in the collective operation.
    4. 老版本的warp primative 不enforce synchronization。使用老版本的代码叫做implicit warp-synchronous programming，是一个危险的行为。
-   5. 从volta版本开始的program model开始，warp within thread schedule independently，而不是lock step
 
 ```cpp
 __all_sync, __any_sync, __uni_sync, __ballot_sync
@@ -442,8 +532,6 @@ shmem[tid] = v;
 ```cpp
  -arch=compute_60 -code=sm_70
 ```
-
-
 
 
 
@@ -611,7 +699,9 @@ each block 使用 2 * 32 * 32 * 4 bytes (float) = 8kb bytes share memory
 Each clock, the GTX 980 SMM core:
 
 1. Selects up to four unique, runnable warps to run instructions from. These four warps can come from any thread block currently active on the core. This is an instance of simultaneous multi-threading (lecture 2). 每个clock，会从64个active warp中选择4个active wap。（active warp的定义是sm maintain warp execution context)。这里的平行是**simutaneous multi-threading**。之所以能选择4个warp是因为有4个warp scheduler (以及对应的pc)
-2. From each of these four warps, the clock attempts to find up to two instructions to execute. This is instruction level parallelism (lecture 1) within the warp. If independent instructions are not present in the warp's instruction stream, then only one instruction from the warp can be executed. There is no ILP in the instruction stream! 每个clock，每个warp (out of 4)，会选择两个独立的instruction来运行。如果找不到两个独立的instruction来运行的话，则运行一个instruction。这里的平行是**ILP**
+2. From each of these four warps, the clock attempts to find up to two instructions to execute. This is instruction level parallelism (lecture 1) within the warp. If independent instructions are not present in the warp's instruction stream, then only one instruction from the warp can be executed. There is no ILP in the instruction stream! 每个clock，每个warp (out of 4)，会选择两个独立的instruction来运行。如果找不到两个独立的instruction来运行的话，则运行一个instruction。这里的平行是**ILP**. 这里independent instruction指的是会使用seprate functional units in SM
+   1. e.g. 如果程序中有两个独立的FMA，SM硬件中有两组FMA，则在一个clock cycle内这两个FMA会同时运行
+
 3. Out of the eight total instructions the core tries to find (across the four threads), up to four of those can be arithmetic instructions. These instructions will be executed on the four different groups of 32-wide SIMD ALUs that the core has. To be absolutely clear, all 4x32 = 128 ALUs in the SMM execute these four 32-wide instructions at the same time -- true parallel execution. (As pointed out in the footnote, and discussed a bit in the discussion on the previous slide, other non-basic-arithmetic instructions, like loads and stores, or special arithmetic ops like sin/cos/pow can also be executed simultaneously with these four basic-SIMD-arithmetic ops, but I didn't draw the units that perform these operations on this diagram.) 从最多8个可能的instruction里，最多4个是数学计算，可以同时被4个32长度的SIMTD ALU处理（same clock)，也可以同时处理load store
 
 
@@ -621,6 +711,20 @@ Note that in the diagram above, the core has the ability to maintain execution c
 
 
 Do not confuse the requirement that all CUDA threads (or their corresponding warps) in a thread block must be live--a.k.a. occupying an execution context on a core-- during the lifetime of the thread block (a requirement that we discuss again on slide 73) with the fact that the core can indeed run instructions from multiple threads simultaneously on its parallel execution units. It seems to me that interleaved multi-threading and simultaneous execution of instructions from multiple threads are being confused in some of the comments posted above. 一个block内thread只要运行的时候就是都active的，因为SM是以block为单位分配资源。
+
+
+
+#### Nested Kernel Call
+
+从Kepler开始，GPU Kernel可以启动GPU Kernel。
+
+Kepler之前，GPU kernel只能从CPU启动
+
+
+
+<img src="Note.assets/3_8.png" alt="3_8" style="zoom:50%;" />
+
+
 
 
 
@@ -671,43 +775,39 @@ CUDA中pointer用来指向global memory
 
 
 
-* 声明各种memory
+* local memory
+
+array如果fix size + small in size有可能会被compiler放在register上。否则会被放在local memory上（物理上在off-chip global memoy上）
+
+struct如果占用空间很大的话，也有可能被放在local memory上
+
+
+
+##### 声明使用各种array
 
 <img src="Note.assets/Screen Shot 2022-05-29 at 10.10.41 PM.png" alt="Screen Shot 2022-05-29 at 10.10.41 PM" style="zoom:50%;" />
 
+* automatic variable
+
 如果没有使用 `__device__`, `__shared__`, `__constant__`的话，则是automatic variable。如果是一个变量的话会是register。如果是per thread array的话会是global memory。
+
+
+
+* local memory
 
 per thread array (per thread local memory) 会被储存在 gloabl memory 中，因为compiler不知道这个array会有多长，无法把array拆分后放到regsiter中。
 
+如果per thread array fix size + small in size, 则compiler有可能把它放在register中。
 
-
-* 为什么使用shared memory & 如何使用shared memory
-
-为了数据复用，就像是CPU里做blocking把数据放到cache上一样。
-
-```cuda
-__shared__ mymemory[SIZE];
-extern __shared__ mymemory[];
-kernelfunc<<<dimgrid, dimblock, sharememsize>>>(params);
-```
+per thread struct 如果大的话，compiler会把它放在local memory中
 
 
 
-* within block communication
+* global memory
 
-使用shared memory + barrier
+`__device__` 从device 声明使用global memory
 
-
-
-* between block communication
-
-使用atomic, global memory
-
-
-
-* register使用的注意
-
-register是有限的，如果使用过多的register，会导致一个SM能够schedule的总block数量减少，减少总的thread数量
+cudaMalloc cudaMemCpy 从host声明使用global memory
 
 
 
@@ -718,6 +818,8 @@ register是有限的，如果使用过多的register，会导致一个SM能够sc
 the hardware combines, or *coalesces*, all these accesses into a consolidated access to consecutive DRAM locations / combined multiple request into a single request for consecutive locations。也就是硬件会融合多个临近的访问为一个对DRAM的访问
 
 GPU中的cache主要作用是memory coalesing，来combine access to DRAM into burst to reduce 总的 num access to DRAM
+
+optimization：访问内存的时候要让多个thread连续访问，尽量使用完burst内全部数据，而且访问要尽量aligned to burst size
 
 
 
@@ -749,7 +851,14 @@ bit的capacitance很小，需要使用sense amplifier来放大信号
 
 
 
-##### DRAM BANK
+##### Burst & DRAM Bank
+
+> Reference
+>
+> 1. NVIDIA Tech Blog Coalesced Transaction Size [link](https://forums.developer.nvidia.com/t/coalesced-transaction-size/24602)
+> 2. Blog CUDA基础 4.3 内存访问模式 [link](https://face2ai.com/CUDA-F-4-3-内存访问模式/)
+
+
 
 多个bit line组成core array
 
@@ -759,7 +868,9 @@ bit的capacitance很小，需要使用sense amplifier来放大信号
 
 **burst size** 读取一次memory address，会有多少个数据被放到buffer中。
 
-常见的GPU burst size是 1024 bits / 128 bytes. 这里的burst size经常被叫做**line size**
+常见的GPU burst size是 1024 bits / 128 bytes (from Fermi). 这里的burst size经常被叫做**line size**
+
+当L1 cache disabled at compile time (default enable), burst size是32 bytes. 
 
 <img src="Note.assets/Screen Shot 2022-05-31 at 12.02.50 AM.png" alt="Screen Shot 2022-05-31 at 12.02.50 AM" style="zoom:50%;" />
 
@@ -887,9 +998,11 @@ modern Double data rate （DDR） bus可以传输two word of data in each clock 
 
 
 
-##### Padded 2D image
+##### Align 2D image
 
-> PMPP Chapter 7
+> Reference
+>
+> 1. PMPP Chapter 7
 
 <img src="Note.assets/IMG_463A2479525D-1.jpeg" alt="IMG_463A2479525D-1" style="zoom:50%;" />
 
@@ -901,11 +1014,82 @@ padded info叫做 `pitch`
 
 
 
+#### Global Memory
+
+##### Pinned memory copy
+
+> Reference
+>
+> 1. NVIDIA Tech Blog How to Optimize Data Transfers in CUDA C/C++ [link](https://developer.nvidia.com/blog/how-optimize-data-transfers-cuda-cc/)
+>    1. 包含了一个memory bandwidth test的代码
+> 2. Stackoverflow Why is CUDA pinned memory so fast? [link](https://stackoverflow.com/questions/5736968/why-is-cuda-pinned-memory-so-fast)
+
+
+
+* synchronize host to device memory copy
+
+Host (CPU) data allocations are pageable by default. The GPU cannot access data directly from pageable host memory, so when a data transfer from pageable host memory to device memory is invoked, the CUDA driver must first allocate a temporary page-locked, or “pinned”, host array, copy the host data to the pinned array, and then transfer the data from the pinned array to device memory. 为了避免要拷贝的数据page  out，首先会使用一个临时的pinned memory拷贝数据到那里，然后再拷贝到device上（下图左）。尽管是从CPU的memory->memory，这个过程会经过CPU core，导致内存收到限制。（CMU的最新arch研究关于如何从cpu mem直接拷贝的mem，不经过cpu）
+
+Not-locked memory can generate a page fault on access, and it is stored not only in memory (e.g. it can be in swap), so driver need to access every page of non-locked memory, copy it into pinned buffer and pass it to DMA 如果内存不是pinned的，则访问的时候对应的内存可能在disk/ssd上，需要经过CPU进行page swap，拷贝到临时的pinned memory，再使用DMA从临时pinned memory拷贝到device global memory上
+
+```cpp
+int *h_a = (int*)malloc(bytes);
+memset(h_a, 0, bytes);
+
+int *d_a;
+cudaMalloc((int**)&d_a, bytes);
+// synchronize copy
+cudaMemcpy(d_a, h_a, bytes, cudaMemcpyHostToDevice);
+```
+
+
+
+* asynchronize host to device memory copy
+
+为了避免cpu change memory page, 需要使用pinned memory
+
+之所以async是为了overlap data transfer with computation
+
+可以有higher bandwidth比起没有pinned的内存
+
+因为pinned内存是有限的资源，分配pinned内存可能会失败，所以一定要检查是否有失败
+
+You should not over-allocate pinned memory. Doing so can reduce overall system performance because it reduces the amount of physical memory available to the operating system and other programs. 不要过度使用pinned memory，这会导致系统整体速度变慢
+
+Locked memory is stored in the physical memory (RAM), so device can fetch it w/o help from CPU (DMA, aka Async copy; device only need list of physical pages). pinned内存可以直接使用DMA拷贝到GPU，不需要经过CPU，从而有更大的bandwidth。
+
+<img src="Note.assets/pinned-1024x541.jpg" alt="pinned-1024x541" style="zoom:50%;" />
+
+
+
+```cpp
+int *h_aPinned, d_a;
+checkCuda(cudaMallocHost((int**)&h_aPinned, bytes));
+memset(h_aPinned, 0, bytes);
+
+checkCuda( cudaMalloc((void**)&d_a, bytes) );
+
+// synchronize copy
+cudaMemcpy(d_a, h_a, bytes, cudaMemcpyHostToDevice);
+```
+
+
+
+##### Batch small transfer
+
+host memory -> device global memory 的拷贝是有overhead的。
+
+希望避免多个small memory copy, 希望是one large memory copy
+
+所以要pack多个small memory copy to large memory copy
+
+
+
 #### Shared memory
 
 * 是什么
 
-1. on chip
+1. on chip (For volta use same physical resources SRAM)
 2. SRAM support random access
 3. don't have constrain of burst like DRAM
 
@@ -940,36 +1124,13 @@ global memory -> cache L1/L2 -> per thread register -> shared memory
 > UIUC 408 Lecture 7
 
 
-##### cache 是什么
-
-GPU Memory line是1024 bits / 128 bytes
-
-cache由多个cache line组成，每个cache line大小与memroy line大小一致，都是128 bytes
-
-
-
-
-
-##### cache 与Shared memory比较
-
-* same
-
-1. both on chip. For volta use same physical resources SRAM
-
-
-
-* different
-
-1. prigrammer control shared memory 
-2. micro-arch determine content of cache
-
 
 
 ##### Constant cache
 
-CPU中的cache需要保证cache coherence，所以hw上实现恨无杂。
+CPU中的cache需要保证cache coherence
 
-GPU中因为多线程，实现cache coherence。
+GPU中因为多线程，实现cache coherence更加复杂
 
 GPU有两种cache，L1 cache和constant cache。
 
@@ -988,6 +1149,10 @@ GPU有两种cache，L1 cache和constant cache。
 constant memory物理上在global memory上，是off chip的
 
 使用constant memory主要是为了使用constant cache，从而减少对global memory的访问
+
+全局可见
+
+使用例子：image filter的weight，math formula的参数
 
 ```cpp
 // constant memory declared outside all function
@@ -1051,21 +1216,79 @@ the flexibility of atomic is changed. now have atomic within warp / block.
 
 
 
+NVCC compiler (from CUDA 9) now performs warp aggregation for atomics automatically in many cases, so you can get higher performance with no extra effort. In fact, the code generated by the compiler is actually faster than the manually-written warp aggregation code. NVCC现在支持自动编译代码使用warp aggregation而且速度比手写的warp aggregation要更快，下面的例子只是用于展示warp aggregation这个方法。
+
+
+
+是什么：In warp aggregation, the threads of a warp first compute a total increment among themselves, and then elect a single thread to atomically add the increment to a global counter. This aggregation reduces the number of atomics performed by up to the number of threads in a warp (up to 32x on current GPUs), and can dramatically improve performance. 以warp为单位进行atomic，首先在warp内部计算出来要atomic的值，然后选出一个thread执行atomic。这样减少了atomic操作的执行次数（atomic操作导致serial execution以及更低的bandwidth，更多的atomic操作带来更低的bandwidth）。
+
+atoimc次数与bandwidth是log的反向相关。下图中的横轴可以理解为number of atomic operation.
+
+<img src="Note.assets/image2.png" alt="Figure 1. Performance of filtering with global atomics on Kepler K80 GPU (CUDA 8.0.61)." style="zoom:60%;" />
+
 
 
 
 
 #### Cache
 
-##### Control cache behavior
+##### cache 是什么
+
+GPU Memory line是1024 bits / 128 bytes (same as burst size)
+
+cache由多个cache line组成，每个cache line大小与memroy line大小一致，都是128 bytes
+
+
+
+##### cache 与Shared memory比较
+
+* same
+
+1. both on chip. For volta use same physical resources SRAM
+
+
+
+* different
+
+1. prigrammer control shared memory 
+2. micro-arch determine content of cache
+
+
+
+##### disable l1 cache
 
 > Reference
 >
-> 1. Cache behavior when loading global data to shared memory in Fermi [link](https://forums.developer.nvidia.com/t/cache-behavior-when-loading-global-data-to-shared-memory-in-fermi/29259)
+> 1. NVIDIA Tech Blog Cache behavior when loading global data to shared memory in Fermi [link](https://forums.developer.nvidia.com/t/cache-behavior-when-loading-global-data-to-shared-memory-in-fermi/29259)
+> 1. NVIDIA Tech Blog Coalesed Transaction Size [link](https://forums.developer.nvidia.com/t/coalesced-transaction-size/24602)
 
 load from global memory to register will be cache at L1 at default. 
 
 If you use the inline PTX call “ld.global.cg”, the read will be cached in L2 but not L1. “ld.global.cs” will not cache the read in L1 or L2. Alternatively, you can use a simple NVCC flag to make either of these types of reads the default by using “-Xptxas -dlcm=cg” or “-Xptxas -dlcm=cs”, though of course that then applies to ALL reads in your program.
+
+
+
+##### Read-only cache for global memory access
+
+> Reference
+>
+> 1. Blog CUDA-F-4-3-内存访问模式 [link](https://face2ai.com/CUDA-F-4-3-内存访问模式/)
+> 2. Stackoverflow What is the difference between __ldg() intrinsic and a normal execution? [link](https://stackoverflow.com/questions/26603188/what-is-the-difference-between-ldg-intrinsic-and-a-normal-execution)
+
+从computation capacity 3.5+， 可以利用read only cache来读取global memory。
+
+read only cache的burst size是32 bytes，而不是L1 cache的128 bytes。
+
+更适合于random access data
+
+```cpp
+__global__ void copyKernel(float * in,float* out)
+{
+    int idx=blockDim*blockIdx.x+threadIdx.x;
+    out[idx]=__ldg(&in[idx]);
+
+}
+```
 
 
 
@@ -2378,3 +2601,6 @@ sorting of input elements into bins representing a region of space containing th
 
 1. 导致thread divergence
 2. 一个block内如果有load imbalance，会导致resource在整个block运行结束之前（也就是imbalance里最多的work）不会释放，导致block占用有限的resource更多的时间（尽管在imbalance的时候，block不需要这么多的resource），导致num thread per SM降低
+
+
+

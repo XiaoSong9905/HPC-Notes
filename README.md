@@ -5,7 +5,9 @@ This repo contains my note on self-learning HPC & Parallel Computation. I am rel
 
 One should notice that I do not contain the copyright of some image files. The copyright belongs to the original author. Any content inside this repo is NOT ALLOWED FOR COMMERCIAL USE.
 
-Correction on mistakes is highly welcomed. 
+I have tried to include all the reference material I used for the corresponding content. This is intended to encourage the user to read those raw reference material themselves as my note only include my undestanding.
+
+Correction on mistakes is highly welcomed. Please post a issue if you found one.
 
 To open markdown file with better format, [typora](https://typora.io) is recommended.
 
@@ -18,7 +20,9 @@ Many thanks to professor James at Berkeley for the excellent CS267 class. Many t
 
 人们应该注意到，我不拥有一些图像文件的版权。版权归原作者所有。本文件中的任何内容均不得用于商业用途。
 
-我非常欢迎纠正错误。
+我尝试批注所有的参考资料。这是为了鼓励用户自己阅读这些原始参考资料，因为我的注释只包括我的理解。
+
+我非常欢迎纠正错误。如果发现问题，请使用issue发布问题。
 
 要以更好的格式打开.md文件，[typora](https://typora.io)推荐使用。
 
