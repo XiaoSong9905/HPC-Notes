@@ -181,6 +181,34 @@
 
 
 
+### C++
+
+- [ ] 深度研究C++对象模型
+    - [ ] 高博：这本书帅呆了
+- [x] STL 源码解析
+- [x] C++ Primer
+- [x] Effective C++
+    1. https://book.douban.com/subject/30178902/
+    2. 包含C++11 C++14语言特性及使用
+    3. 非常重要，需要多次阅读
+- [ ] Exceptional C++（中文版）
+    1. https://book.douban.com/subject/10785602/
+    2. 资源管理 异常管理 内存模型
+- [ ] C++ Templates 中文版
+    1. https://book.douban.com/subject/23780707/
+    2. template使用
+- [ ] More Effective C++
+    1. 非常重要，需要多次阅读
+- [ ] More Exceptional C++
+- [ ] Effective STL
+    - [ ] 偏理论层面，比较有深度
+- [ ] Exceptional C++ Style C++编程剖析:问题、方案和设计准则
+- [ ] C++ Coding Standards C++编程规范
+- [ ] 现代C++教程
+- [ ] 程序设计实践
+- [ ] Thinking in C++ C++编程思想
+- [ ] Modern C++ Design
+
 
 
 ## Degree & Program

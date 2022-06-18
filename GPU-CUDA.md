@@ -1168,7 +1168,61 @@ cudaMemcpyToSymbol(Mc, Mask,, MASK_WIDTH*MASK_WIDTH*sizeof(float));
 
 #### Atomic
 
-> UIUC 508 Lecture 2
+> Reference
+>
+> 1. UIUC 508 Lecture 2
+> 2. UIUC 408 Lecture 18
+> 3. PMPP Chapter 9
+
+
+
+##### Latency
+
+atomic 操作的latency = dram load latency + internal routing + dram store latency
+
+因为需要先读取gloabl memory，把数据传送给SM（这个时候其余的thread/SM不能r/w这块内存)，再把数据传送给global memory
+
+对于global memory，latency是few hunderdes cycle
+
+对于last level cache, latency是few tens cycle
+
+对于shared memocy, latency是few cycle
+
+<img src="Note.assets/Screen Shot 2022-06-18 at 4.49.28 PM.png" alt="Screen Shot 2022-06-18 at 4.49.28 PM" style="zoom:50%;" />
+
+
+
+modern GPU支持在last level cache上进行atomic操作，也就把atomic的latency从few hunderdes cycle变为了few tens cycle. 这个优化不需要任何programmer的更改，是通过使用更先进的hardware来实现的。
+
+
+
+##### Throughput
+
+GPU通过很多thread来hide latency。也就要求many DRAM access happen simutaniously来充分利用hardware bandwidth.
+
+使用atomic操作以后，对于某一个memory location的访问是serialize的，导致实际bandwidth降低。
+
+atomic throughput与latency是成反比的。
+
+
+
+* 例子
+
+假设64 bit double data rate DRAM with 8 channel 1GHz clock frequency. DRAM latency is 200 cycles
+
+peak throughput是 8 (64 bit per transfer) * 2 (two transfer per clock pe channel) * 8 (channels) * 1G (clock per second) = 128GB/second
+
+
+
+atomic的latency如果是400 clock cycle
+
+throughput就是 1/400 atomic / clock * 1GHz clock/second = 2.5 M atomic / second
+
+
+
+如果uniform的atomic 26 alphabet，则throughput是 2.5M * 26 / second
+
+
 
 ##### Evolving
 
@@ -2466,6 +2520,7 @@ GPU上由于thread的总数量很多，使用privitization需要注意
 > Reference
 >
 > 1. UIUC 408 Lecture 18
+> 2. PMPP Chapter 9
 
 histogram中有highly contentious output conflict，每个thread都有很多的写
 
@@ -2474,6 +2529,89 @@ histogram中有highly contentious output conflict，每个thread都有很多的�
 如果使用all thread wihtin block share private copy的话，使用atoimic就会是一个问题
 
 主要高速我们privitization的coarsening是取决于程序的，并不一定总是private to thread / private to block
+
+privitization需要平衡level of contentions以及最后的merging cost. 所以一般privitization选择subset of thread而非单独thread来进行。
+
+
+
+##### Simple Memory Coalesed
+
+thread 之间访问连续的内存从而实现memory coalesed
+
+使用global memory atomic来避免race condition
+
+<img src="Note.assets/Screen Shot 2022-06-18 at 4.46.46 PM.png" alt="Screen Shot 2022-06-18 at 4.46.46 PM" style="zoom:50%;" />
+
+```cpp
+__global__
+void histo_kernel(unsigned char *buffer, long size, unsigned int *histo)
+{
+		int i = threadIdx.x + blockIdx.x * blockDim.x;
+    
+  	// stride is total number of threads
+    int stride = blockDim.x * gridDim.x;
+    // All threads in the grid collectively handle
+   	// blockDim.x * gridDim.x consecutive elements
+   	while (i < size) {
+       atomicAdd( &(histo[buffer[i]]), 1);
+			 i += stride; 
+    }
+}
+```
+
+
+
+##### Privitization
+
+这里选择的privitization的范围是一个block内的全部thread
+
+通过使用shared memory来privitization，这样减少了atomic latency, 增加了throughput
+
+```cpp
+__global__ void histogram_privatized_kernel(unsigned char* input, unsigned int* bins, unsigned int num_elements, unsigned int num_bins) 
+{ 
+    unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
+
+    // Privatized bins
+    extern __shared__ unsigned int histo_s[];
+
+    for(unsigned int binIdx = threadIdx.x; binIdx < num_bins; binIdx +=blockDim.x) 
+    {
+        histo_s[binIdx] = 0u; 
+        __syncthreads();
+
+        // Histogram
+        for (unsigned int i = tid; i < num_elements; i += blockDim.x*gridDim.x) 
+        {
+        int alphabet_position = buffer[i] – “a”;
+        if (alphabet_position >= 0 && alpha_position < 26) 
+            atomicAdd(&(histo_s[alphabet_position/4]), 1);
+        } 
+
+        __syncthreads();
+        // Commit to global memory
+        for(unsigned int binIdx = threadIdx.x; binIdx < num_bins; binIdx += blockDim.x) 
+        {
+            atomicAdd(&(histo[binIdx]), histo_s[binIdx]);
+        } 
+    }
+}
+```
+
+
+
+##### Aggregation
+
+是什么：同一个thread如果连续遇到多个相同的值，则可以现在本地aggregate一个值，当值发生改变的时候，再进行atomic。这样可以减少总的atomic的次数。
+
+
+
+* 缺点
+
+1. 需要执行更多的instruction，因为现在需要判断当前的value是否与之前的value相同
+2. 需要使用更多的register
+
+当contentious 比较low的时候，使用aggregate的效果实际上是不好的
 
 
 
