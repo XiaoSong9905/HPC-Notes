@@ -2,7 +2,7 @@
 
 > Reference
 >
-> 1. PMPP Chapter 6
+> 1. Programming Massively Parallel Processors 3rd edition Chapter 6
 
 
 

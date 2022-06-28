@@ -1,6 +1,6 @@
 # Xiao Song's HPC & Parallel Computation Note
 
-## Ackmowlegement
+## Acknowlegement
 This repo contains my note on self-learning HPC & Parallel Computation. I am releasing my note because I wish my note could help people who are interested in HPC & Parallel Computing and want to learn it themselves. 
 
 One should notice that I do not contain the copyright of some image files. The copyright belongs to the original author. Any content inside this repo is NOT ALLOWED FOR COMMERCIAL USE.
@@ -32,11 +32,12 @@ Many thanks to professor James at Berkeley for the excellent CS267 class. Many t
 
 ## File Structure
 
+CUDA related content (origianlly under `GPU-CUDA.md`) have been move to a seprate repo [CUDA-Optimization-Guide](https://github.com/XiaoSong9905/CUDA-Optimization-Guide)
+
 ```shell
 Resources.md   # Useful resources for learning HPC
 Basic.md # Contain basic knowlege
 OptimizeSerialCode.md # How to optimize serial code
-GPU-CUDA.md # CUDA related knowlege
 Compiler.md # Compiler related optimization
 ThreeParallelModel # 3 parallel model of programming
 Scheduling.md # scheduling related topic

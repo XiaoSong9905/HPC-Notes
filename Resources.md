@@ -150,6 +150,7 @@
     * 内容与UIUC ECE相同
   * Applied Parallel Programming (Short Version - Independent Study) [link](http://prerequisite.hwu-server2.crhc.illinois.edu/_layouts/15/start.aspx#/)
     * UIUC 508 里说，应该先上完这节课，再开始508.大概内容是一个比408更加多，但是更general的课程
+  * Caltech CS179 [link](http://courses.cms.caltech.edu/cs179/)
 
 
 
